@@ -21,6 +21,9 @@ package org.apache.flink.runtime.state;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentCheckpointUtils;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentOperatorStreamStateHandle;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManagerHolder;
 import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 
 import javax.annotation.Nonnull;
@@ -121,7 +124,18 @@ class DefaultOperatorStateBackendSnapshotStrategy
 
         if (registeredBroadcastStatesDeepCopies.isEmpty()
                 && registeredOperatorStatesDeepCopies.isEmpty()) {
-            return snapshotCloseableRegistry -> SnapshotResult.empty();
+            if (streamFactory instanceof SegmentSnapshotManagerHolder) {
+                ((SegmentSnapshotManagerHolder) streamFactory)
+                        .getSsmWorkingDirectory(CheckpointedStateScope.EXCLUSIVE);
+                return (snapshotCloseableRegistry) ->
+                        SnapshotResult.of(
+                                SegmentCheckpointUtils.emptyOperatorStreamStateHandle(
+                                        ((SegmentSnapshotManagerHolder) streamFactory)
+                                                .getSsmWorkingDirectory(
+                                                        CheckpointedStateScope.EXCLUSIVE)));
+            } else {
+                return snapshotCloseableRegistry -> SnapshotResult.empty();
+            }
         }
 
         return (snapshotCloseableRegistry) -> {
@@ -213,7 +227,16 @@ class DefaultOperatorStateBackendSnapshotStrategy
             if (snapshotCloseableRegistry.unregisterCloseable(localOut)) {
                 StreamStateHandle stateHandle = localOut.closeAndGetHandle();
                 if (stateHandle != null) {
-                    retValue = new OperatorStreamStateHandle(writtenStatesMetaData, stateHandle);
+                    retValue =
+                            streamFactory instanceof SegmentSnapshotManagerHolder
+                                    ? new SegmentOperatorStreamStateHandle(
+                                            ((SegmentSnapshotManagerHolder) streamFactory)
+                                                    .getSsmWorkingDirectory(
+                                                            CheckpointedStateScope.EXCLUSIVE),
+                                            writtenStatesMetaData,
+                                            stateHandle)
+                                    : new OperatorStreamStateHandle(
+                                            writtenStatesMetaData, stateHandle);
                 }
                 return SnapshotResult.of(retValue);
             } else {

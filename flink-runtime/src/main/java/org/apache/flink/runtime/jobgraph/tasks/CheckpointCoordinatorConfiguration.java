@@ -259,6 +259,9 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
         private long alignedCheckpointTimeout = 0;
         private long checkpointIdOfIgnoredInFlightData;
         private boolean enableCheckpointsAfterTasksFinish;
+        private boolean enableSegmentedCheckpoint;
+        private boolean enableSegmentedCheckpointAcrossBoundary;
+        private long segmentedCheckpointMaxFileSize;
 
         public CheckpointCoordinatorConfiguration build() {
             return new CheckpointCoordinatorConfiguration(

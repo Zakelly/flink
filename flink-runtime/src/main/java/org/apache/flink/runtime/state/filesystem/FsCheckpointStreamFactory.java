@@ -454,6 +454,7 @@ public class FsCheckpointStreamFactory implements CheckpointStreamFactory {
                                     fs, createStatePath(), WriteMode.NO_OVERWRITE);
                     this.outStream = streamAndPath.stream();
                     this.statePath = streamAndPath.path();
+                    updateFileCreationMetrics();
                     return;
                 } catch (Exception e) {
                     latestException = e;
@@ -462,6 +463,11 @@ public class FsCheckpointStreamFactory implements CheckpointStreamFactory {
 
             throw new IOException(
                     "Could not open output stream for state backend", latestException);
+        }
+
+        private void updateFileCreationMetrics() {
+            // todo: use io metrics
+            LOG.info("Create a new physical file.");
         }
     }
 }

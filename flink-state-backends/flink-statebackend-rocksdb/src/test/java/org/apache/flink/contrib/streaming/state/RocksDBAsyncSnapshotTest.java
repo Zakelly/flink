@@ -213,6 +213,7 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
                         checkpointResponderMock,
                         TestLocalRecoveryConfig.disabled(),
                         new InMemoryStateChangelogStorage(),
+                        null,
                         new HashMap<>(),
                         -1L,
                         new OneShotLatch());

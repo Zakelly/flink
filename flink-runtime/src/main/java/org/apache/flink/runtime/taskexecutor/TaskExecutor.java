@@ -32,6 +32,7 @@ import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.JobManagerTaskRestore;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
@@ -99,6 +100,7 @@ import org.apache.flink.runtime.shuffle.ShuffleDescriptor;
 import org.apache.flink.runtime.shuffle.ShuffleEnvironment;
 import org.apache.flink.runtime.state.TaskExecutorChannelStateExecutorFactoryManager;
 import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager;
+import org.apache.flink.runtime.state.TaskExecutorSegmentSnapshotManager;
 import org.apache.flink.runtime.state.TaskExecutorStateChangelogStoragesManager;
 import org.apache.flink.runtime.state.TaskLocalStateStore;
 import org.apache.flink.runtime.state.TaskStateManager;
@@ -224,6 +226,9 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
      */
     private final TaskExecutorChannelStateExecutorFactoryManager channelStateExecutorFactoryManager;
 
+    /** The changelog manager for this task, providing changelog storage per job. */
+    private final TaskExecutorSegmentSnapshotManager segmentSnapshotManagers;
+
     /** Information provider for external resources. */
     private final ExternalResourceInfoProvider externalResourceInfoProvider;
 
@@ -328,6 +333,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
         this.changelogStoragesManager = taskExecutorServices.getTaskManagerChangelogManager();
         this.channelStateExecutorFactoryManager =
                 taskExecutorServices.getTaskManagerChannelStateManager();
+        this.segmentSnapshotManagers = taskExecutorServices.getTaskManagerSegmentSnapshotManager();
         this.shuffleEnvironment = taskExecutorServices.getShuffleEnvironment();
         this.kvStateService = taskExecutorServices.getKvStateService();
         this.ioExecutor = taskExecutorServices.getIOExecutor();
@@ -735,6 +741,10 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                 throw new TaskSubmissionException(e);
             }
 
+            final SegmentSnapshotManager segmentSnapshotManager =
+                    segmentSnapshotManagers.segmentSnapshotManagerForJob(
+                            jobId, taskManagerConfiguration.getConfiguration());
+
             final JobManagerTaskRestore taskRestore = tdd.getTaskRestore();
 
             final TaskStateManager taskStateManager =
@@ -744,6 +754,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                             localStateStore,
                             changelogStorage,
                             changelogStoragesManager,
+                            segmentSnapshotManager,
                             taskRestore,
                             checkpointResponder);
 

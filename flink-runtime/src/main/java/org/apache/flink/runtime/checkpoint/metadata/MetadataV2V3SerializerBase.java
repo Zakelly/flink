@@ -26,6 +26,13 @@ import org.apache.flink.runtime.checkpoint.MasterState;
 import org.apache.flink.runtime.checkpoint.OperatorState;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.StateObjectCollection;
+import org.apache.flink.runtime.checkpoint.segmented.EmptySegmentFileStateHandle;
+import org.apache.flink.runtime.checkpoint.segmented.EmptySegmentOperatorStreamStateHandle;
+import org.apache.flink.runtime.checkpoint.segmented.LogicalFile.LogicalFileId;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentCheckpointUtils;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentFileStateHandle;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentOperatorStreamStateHandle;
+import org.apache.flink.runtime.state.CheckpointedStateScope;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.InputChannelStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
@@ -51,6 +58,7 @@ import org.apache.flink.runtime.state.filesystem.FileStateHandle;
 import org.apache.flink.runtime.state.filesystem.RelativeFileStateHandle;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.BiConsumerWithException;
 import org.apache.flink.util.function.BiFunctionWithException;
 
@@ -122,6 +130,11 @@ public abstract class MetadataV2V3SerializerBase {
     private static final byte CHANGELOG_FILE_INCREMENT_HANDLE_V2 = 13;
     // CHANGELOG_HANDLE_V2 is introduced to add new field of checkpointId.
     private static final byte CHANGELOG_HANDLE_V2 = 14;
+
+    private static final byte SEGMENT_FILE_HANDLE = 44;
+    private static final byte EMPTY_SEGMENT_FILE_HANDLE = 45;
+
+    private static final byte SEGMENT_PARTITIONABLE_OPERATOR_STATE_HANDLE = 46;
 
     // ------------------------------------------------------------------------
     //  (De)serialization entry points
@@ -583,7 +596,10 @@ public abstract class MetadataV2V3SerializerBase {
     void serializeOperatorStateHandle(OperatorStateHandle stateHandle, DataOutputStream dos)
             throws IOException {
         if (stateHandle != null) {
-            dos.writeByte(PARTITIONABLE_OPERATOR_STATE_HANDLE);
+            dos.writeByte(
+                    stateHandle instanceof SegmentOperatorStreamStateHandle
+                            ? SEGMENT_PARTITIONABLE_OPERATOR_STATE_HANDLE
+                            : PARTITIONABLE_OPERATOR_STATE_HANDLE);
             Map<String, OperatorStateHandle.StateMetaInfo> partitionOffsetsMap =
                     stateHandle.getStateNameToPartitionOffsets();
             dos.writeInt(partitionOffsetsMap.size());
@@ -602,6 +618,15 @@ public abstract class MetadataV2V3SerializerBase {
                     dos.writeLong(offset);
                 }
             }
+            if (stateHandle instanceof SegmentOperatorStreamStateHandle) {
+                dos.writeUTF(
+                        ((SegmentOperatorStreamStateHandle) stateHandle)
+                                .getDirectoryStateHandle()
+                                .getDirectory()
+                                .toUri()
+                                .toString());
+                dos.writeBoolean(stateHandle instanceof EmptySegmentOperatorStreamStateHandle);
+            }
             serializeStreamStateHandle(stateHandle.getDelegateStateHandle(), dos);
         } else {
             dos.writeByte(NULL_HANDLE);
@@ -614,7 +639,8 @@ public abstract class MetadataV2V3SerializerBase {
         final int type = dis.readByte();
         if (NULL_HANDLE == type) {
             return null;
-        } else if (PARTITIONABLE_OPERATOR_STATE_HANDLE == type) {
+        } else if (PARTITIONABLE_OPERATOR_STATE_HANDLE == type
+                || SEGMENT_PARTITIONABLE_OPERATOR_STATE_HANDLE == type) {
             int mapSize = dis.readInt();
             Map<String, OperatorStateHandle.StateMetaInfo> offsetsMap = new HashMap<>(mapSize);
             for (int i = 0; i < mapSize; ++i) {
@@ -632,8 +658,20 @@ public abstract class MetadataV2V3SerializerBase {
                         new OperatorStateHandle.StateMetaInfo(offsets, mode);
                 offsetsMap.put(key, metaInfo);
             }
-            StreamStateHandle stateHandle = deserializeStreamStateHandle(dis, context);
-            return new OperatorStreamStateHandle(offsetsMap, stateHandle);
+            if (SEGMENT_PARTITIONABLE_OPERATOR_STATE_HANDLE == type) {
+                String dirPathStr = dis.readUTF();
+                boolean isEmpty = dis.readBoolean();
+                StreamStateHandle stateHandle = deserializeStreamStateHandle(dis, context);
+                Preconditions.checkArgument(stateHandle instanceof SegmentFileStateHandle);
+                return isEmpty
+                        ? new EmptySegmentOperatorStreamStateHandle(
+                                new Path(dirPathStr), offsetsMap, stateHandle)
+                        : new SegmentOperatorStreamStateHandle(
+                                new Path(dirPathStr), offsetsMap, stateHandle);
+            } else {
+                StreamStateHandle stateHandle = deserializeStreamStateHandle(dis, context);
+                return new OperatorStreamStateHandle(offsetsMap, stateHandle);
+            }
         } else {
             throw new IllegalStateException("Reading invalid OperatorStateHandle, type: " + type);
         }
@@ -677,6 +715,19 @@ public abstract class MetadataV2V3SerializerBase {
             RelativeFileStateHandle relativeFileStateHandle = (RelativeFileStateHandle) stateHandle;
             dos.writeUTF(relativeFileStateHandle.getRelativePath());
             dos.writeLong(relativeFileStateHandle.getStateSize());
+        } else if (stateHandle instanceof SegmentFileStateHandle) {
+            if (stateHandle instanceof EmptySegmentFileStateHandle) {
+                dos.writeByte(EMPTY_SEGMENT_FILE_HANDLE);
+            } else {
+                dos.writeByte(SEGMENT_FILE_HANDLE);
+                SegmentFileStateHandle segmentFileStateHandle =
+                        (SegmentFileStateHandle) stateHandle;
+                dos.writeLong(segmentFileStateHandle.getStartPos());
+                dos.writeLong(segmentFileStateHandle.getStateSize());
+                dos.writeUTF(segmentFileStateHandle.getLogicalFileId().getKeyString());
+                dos.writeInt(segmentFileStateHandle.getScope().ordinal());
+                dos.writeUTF(segmentFileStateHandle.getFilePath().toString());
+            }
         } else if (stateHandle instanceof FileStateHandle) {
             dos.writeByte(FILE_STREAM_STATE_HANDLE);
             FileStateHandle fileStateHandle = (FileStateHandle) stateHandle;
@@ -745,6 +796,16 @@ public abstract class MetadataV2V3SerializerBase {
                     new KeyGroupRangeOffsets(keyGroupRange, offsets);
             StreamStateHandle stateHandle = deserializeStreamStateHandle(dis, context);
             return new KeyGroupsStateHandle(keyGroupRangeOffsets, stateHandle);
+        } else if (SEGMENT_FILE_HANDLE == type) {
+            long startPos = dis.readLong();
+            long stateSize = dis.readLong();
+            LogicalFileId logicalFileId = new LogicalFileId(dis.readUTF());
+            CheckpointedStateScope scope = CheckpointedStateScope.values()[dis.readInt()];
+            Path physicalFilePath = new Path(dis.readUTF());
+            return new SegmentFileStateHandle(
+                    physicalFilePath, startPos, stateSize, logicalFileId, scope);
+        } else if (EMPTY_SEGMENT_FILE_HANDLE == type) {
+            return SegmentCheckpointUtils.getEmptySegmentFileStateHandle();
         } else {
             throw new IOException("Unknown implementation of StreamStateHandle, code: " + type);
         }

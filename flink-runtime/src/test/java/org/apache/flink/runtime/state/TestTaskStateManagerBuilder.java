@@ -18,8 +18,11 @@
 package org.apache.flink.runtime.state;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentCheckpointUtils;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.state.changelog.StateChangelogStorage;
 import org.apache.flink.runtime.state.changelog.inmemory.InMemoryStateChangelogStorage;
@@ -45,6 +48,9 @@ public class TestTaskStateManagerBuilder {
 
     @Nullable
     private StateChangelogStorage<?> stateChangelogStorage = new InMemoryStateChangelogStorage();
+
+    private SegmentSnapshotManager segmentSnapshotManager =
+            SegmentCheckpointUtils.createSegmentSnapshotManager("Testing", new Configuration());
 
     private final Map<Long, TaskStateSnapshot> jobManagerTaskStateSnapshotsByCheckpointId =
             new HashMap<>();
@@ -109,6 +115,7 @@ public class TestTaskStateManagerBuilder {
                 checkpointResponder,
                 localRecoveryConfig,
                 stateChangelogStorage,
+                segmentSnapshotManager,
                 jobManagerTaskStateSnapshotsByCheckpointId,
                 reportedCheckpointId,
                 waitForReportLatch);

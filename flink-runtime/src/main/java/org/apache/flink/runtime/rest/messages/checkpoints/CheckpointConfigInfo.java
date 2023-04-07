@@ -72,6 +72,14 @@ public class CheckpointConfigInfo implements ResponseBody {
 
     public static final String FIELD_NAME_CHANGELOG_STORAGE = "changelog_storage";
 
+    public static final String FIELD_NAME_SEGMENTED_CHECKPOINT = "segmented_checkpoint";
+
+    public static final String FIELD_NAME_SEGMENTED_CHECKPOINT_ACROSS_BOUNDARY =
+            "segmented_checkpoint_across_boundary";
+
+    public static final String FIELD_NAME_SEGMENTED_CHECKPOINT_MAX_FILE_SIZE =
+            "segmented_checkpoint_max_file_size";
+
     @JsonProperty(FIELD_NAME_PROCESSING_MODE)
     private final ProcessingMode processingMode;
 

@@ -28,6 +28,8 @@ import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.checkpoint.channel.SequentialChannelStateReader;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentCheckpointUtils;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.changelog.ChangelogStateHandle;
@@ -48,6 +50,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.runtime.executiongraph.ExecutionGraphTestUtils.createExecutionAttemptId;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -68,6 +71,7 @@ public class TestTaskStateManager implements TaskStateManager {
     private final OneShotLatch waitForReportLatch;
     private final LocalRecoveryConfig localRecoveryDirectoryProvider;
     private final StateChangelogStorage<?> stateChangelogStorage;
+    private final SegmentSnapshotManager segmentSnapshotManager;
 
     public TestTaskStateManager() {
         this(TestLocalRecoveryConfig.disabled());
@@ -80,6 +84,8 @@ public class TestTaskStateManager implements TaskStateManager {
                 new TestCheckpointResponder(),
                 localRecoveryConfig,
                 new InMemoryStateChangelogStorage(),
+                SegmentCheckpointUtils.createSegmentSnapshotManager(
+                        String.valueOf(ThreadLocalRandom.current().nextInt()), new Configuration()),
                 new HashMap<>(),
                 -1L,
                 new OneShotLatch());
@@ -91,6 +97,7 @@ public class TestTaskStateManager implements TaskStateManager {
             CheckpointResponder checkpointResponder,
             LocalRecoveryConfig localRecoveryConfig,
             @Nullable StateChangelogStorage<?> changelogStorage,
+            SegmentSnapshotManager segmentSnapshotManager,
             Map<Long, TaskStateSnapshot> jobManagerTaskStateSnapshotsByCheckpointId,
             long reportedCheckpointId,
             OneShotLatch waitForReportLatch) {
@@ -99,6 +106,7 @@ public class TestTaskStateManager implements TaskStateManager {
         this.checkpointResponder = checkNotNull(checkpointResponder);
         this.localRecoveryDirectoryProvider = checkNotNull(localRecoveryConfig);
         this.stateChangelogStorage = changelogStorage;
+        this.segmentSnapshotManager = segmentSnapshotManager;
         this.jobManagerTaskStateSnapshotsByCheckpointId =
                 checkNotNull(jobManagerTaskStateSnapshotsByCheckpointId);
         this.taskManagerTaskStateSnapshotsByCheckpointId = new HashMap<>();
@@ -242,6 +250,11 @@ public class TestTaskStateManager implements TaskStateManager {
             ExceptionUtils.rethrow(e);
         }
         return storageView;
+    }
+
+    @Override
+    public SegmentSnapshotManager getSegmentSnapshotManager() {
+        return segmentSnapshotManager;
     }
 
     @Override

@@ -26,8 +26,11 @@ public class MetricNames {
 
     public static final String IO_NUM_RECORDS_IN = "numRecordsIn";
     public static final String IO_NUM_RECORDS_OUT = "numRecordsOut";
+    public static final String IO_NUM_CHECKPOINT_FILE_CREATED = "numCheckpointFilesCreated";
     public static final String IO_NUM_RECORDS_IN_RATE = IO_NUM_RECORDS_IN + SUFFIX_RATE;
     public static final String IO_NUM_RECORDS_OUT_RATE = IO_NUM_RECORDS_OUT + SUFFIX_RATE;
+    public static final String IO_NUM_CHECKPOINT_FILE_CREATED_RATE =
+            IO_NUM_CHECKPOINT_FILE_CREATED + SUFFIX_RATE;
 
     public static final String IO_NUM_BYTES_IN = "numBytesIn";
     public static final String IO_NUM_BYTES_OUT = "numBytesOut";

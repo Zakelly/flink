@@ -37,6 +37,7 @@ import org.apache.flink.runtime.shuffle.ShuffleEnvironmentContext;
 import org.apache.flink.runtime.shuffle.ShuffleServiceLoader;
 import org.apache.flink.runtime.state.TaskExecutorChannelStateExecutorFactoryManager;
 import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager;
+import org.apache.flink.runtime.state.TaskExecutorSegmentSnapshotManager;
 import org.apache.flink.runtime.state.TaskExecutorStateChangelogStoragesManager;
 import org.apache.flink.runtime.taskexecutor.slot.DefaultTimerService;
 import org.apache.flink.runtime.taskexecutor.slot.FileSlotAllocationSnapshotPersistenceService;
@@ -82,6 +83,7 @@ public class TaskManagerServices {
     private final TaskExecutorLocalStateStoresManager taskManagerStateStore;
     private final TaskExecutorStateChangelogStoragesManager taskManagerChangelogManager;
     private final TaskExecutorChannelStateExecutorFactoryManager taskManagerChannelStateManager;
+    private final TaskExecutorSegmentSnapshotManager taskManagerSegmentSnapshotManager;
     private final TaskEventDispatcher taskEventDispatcher;
     private final ExecutorService ioExecutor;
     private final LibraryCacheManager libraryCacheManager;
@@ -101,6 +103,7 @@ public class TaskManagerServices {
             TaskExecutorLocalStateStoresManager taskManagerStateStore,
             TaskExecutorStateChangelogStoragesManager taskManagerChangelogManager,
             TaskExecutorChannelStateExecutorFactoryManager taskManagerChannelStateManager,
+            TaskExecutorSegmentSnapshotManager taskManagerSegmentSnapshotManager,
             TaskEventDispatcher taskEventDispatcher,
             ExecutorService ioExecutor,
             LibraryCacheManager libraryCacheManager,
@@ -120,6 +123,8 @@ public class TaskManagerServices {
         this.taskManagerStateStore = Preconditions.checkNotNull(taskManagerStateStore);
         this.taskManagerChangelogManager = Preconditions.checkNotNull(taskManagerChangelogManager);
         this.taskManagerChannelStateManager = taskManagerChannelStateManager;
+        this.taskManagerSegmentSnapshotManager =
+                Preconditions.checkNotNull(taskManagerSegmentSnapshotManager);
         this.taskEventDispatcher = Preconditions.checkNotNull(taskEventDispatcher);
         this.ioExecutor = Preconditions.checkNotNull(ioExecutor);
         this.libraryCacheManager = Preconditions.checkNotNull(libraryCacheManager);
@@ -177,6 +182,10 @@ public class TaskManagerServices {
 
     public TaskExecutorChannelStateExecutorFactoryManager getTaskManagerChannelStateManager() {
         return taskManagerChannelStateManager;
+    }
+
+    public TaskExecutorSegmentSnapshotManager getTaskManagerSegmentSnapshotManager() {
+        return taskManagerSegmentSnapshotManager;
     }
 
     public TaskEventDispatcher getTaskEventDispatcher() {
@@ -352,6 +361,10 @@ public class TaskManagerServices {
         final TaskExecutorChannelStateExecutorFactoryManager channelStateExecutorFactoryManager =
                 new TaskExecutorChannelStateExecutorFactoryManager();
 
+        final TaskExecutorSegmentSnapshotManager segmentSnapshotManager =
+                new TaskExecutorSegmentSnapshotManager(
+                        taskManagerServicesConfiguration.getResourceID());
+
         final boolean failOnJvmMetaspaceOomError =
                 taskManagerServicesConfiguration
                         .getConfiguration()
@@ -394,6 +407,7 @@ public class TaskManagerServices {
                 taskStateManager,
                 changelogStoragesManager,
                 channelStateExecutorFactoryManager,
+                segmentSnapshotManager,
                 taskEventDispatcher,
                 ioExecutor,
                 libraryCacheManager,

@@ -29,6 +29,7 @@ import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.checkpoint.channel.SequentialChannelStateReader;
 import org.apache.flink.runtime.checkpoint.channel.SequentialChannelStateReaderImpl;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.changelog.ChangelogStateHandle;
@@ -82,6 +83,9 @@ public class TaskStateManagerImpl implements TaskStateManager {
 
     private final TaskExecutorStateChangelogStoragesManager changelogStoragesManager;
 
+    /** The manager for segmented snapshot. * */
+    @Nullable private final SegmentSnapshotManager segmentSnapshotManager;
+
     /** The checkpoint responder through which this manager can report to the job manager. */
     private final CheckpointResponder checkpointResponder;
 
@@ -93,6 +97,7 @@ public class TaskStateManagerImpl implements TaskStateManager {
             @Nonnull TaskLocalStateStore localStateStore,
             @Nullable StateChangelogStorage<?> stateChangelogStorage,
             @Nonnull TaskExecutorStateChangelogStoragesManager changelogStoragesManager,
+            @Nullable SegmentSnapshotManager segmentSnapshotManager,
             @Nullable JobManagerTaskRestore jobManagerTaskRestore,
             @Nonnull CheckpointResponder checkpointResponder) {
         this(
@@ -101,6 +106,7 @@ public class TaskStateManagerImpl implements TaskStateManager {
                 localStateStore,
                 stateChangelogStorage,
                 changelogStoragesManager,
+                segmentSnapshotManager,
                 jobManagerTaskRestore,
                 checkpointResponder,
                 new SequentialChannelStateReaderImpl(
@@ -115,6 +121,7 @@ public class TaskStateManagerImpl implements TaskStateManager {
             @Nonnull TaskLocalStateStore localStateStore,
             @Nullable StateChangelogStorage<?> stateChangelogStorage,
             @Nonnull TaskExecutorStateChangelogStoragesManager changelogStoragesManager,
+            @Nullable SegmentSnapshotManager segmentSnapshotManager,
             @Nullable JobManagerTaskRestore jobManagerTaskRestore,
             @Nonnull CheckpointResponder checkpointResponder,
             @Nonnull SequentialChannelStateReaderImpl sequentialChannelStateReader) {
@@ -122,6 +129,7 @@ public class TaskStateManagerImpl implements TaskStateManager {
         this.localStateStore = localStateStore;
         this.stateChangelogStorage = stateChangelogStorage;
         this.changelogStoragesManager = changelogStoragesManager;
+        this.segmentSnapshotManager = segmentSnapshotManager;
         this.jobManagerTaskRestore = jobManagerTaskRestore;
         this.executionAttemptID = executionAttemptID;
         this.checkpointResponder = checkpointResponder;
@@ -268,6 +276,12 @@ public class TaskStateManagerImpl implements TaskStateManager {
             ExceptionUtils.rethrow(e);
         }
         return storageView;
+    }
+
+    @Nullable
+    @Override
+    public SegmentSnapshotManager getSegmentSnapshotManager() {
+        return segmentSnapshotManager;
     }
 
     /** Tracking when local state can be confirmed and disposed. */

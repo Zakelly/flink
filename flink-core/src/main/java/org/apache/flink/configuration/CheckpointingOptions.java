@@ -243,4 +243,35 @@ public class CheckpointingOptions {
                                             + "The actual write buffer size is determined to be the maximum of the value of this option and option '%s'.",
                                     FS_SMALL_FILE_THRESHOLD.key()))
                     .withDeprecatedKeys("state.backend.fs.write-buffer-size");
+
+    public static final ConfigOption<Boolean> ENABLE_SEGMENTED_CHECKPOINT =
+            ConfigOptions.key("state.checkpoints.segmented")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable merging multiple checkpoint files into one, which greatly reduces the number of small checkpoint files.");
+
+    public static final ConfigOption<Boolean> SEGMENTED_ACROSS_BOUNDARY =
+            ConfigOptions.key("state.checkpoints.segmented.across-checkpoint-boundary")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Only relevant if %s is enabled.",
+                                            TextElement.code(ENABLE_SEGMENTED_CHECKPOINT.key()))
+                                    .linebreak()
+                                    .text(
+                                            "Allow merging data of multiple checkpoints into one physical file."
+                                                    + "If this option is set to false, we only merge files within checkpoint boundaries."
+                                                    + "Otherwise, it is possible for the logical files of different checkpoints to share the same physical file.")
+                                    .build());
+
+    public static final ConfigOption<Long> SEGMENTED_CHECKPOINT_MAX_FILE_SIZE =
+            ConfigOptions.key("state.checkpoints.segmented.max-file-size")
+                    .longType()
+                    .defaultValue(-1L)
+                    .withDescription(
+                            "Max size of a physical file for segmented checkpoints."
+                                    + "Set to -1 as unlimited.");
 }

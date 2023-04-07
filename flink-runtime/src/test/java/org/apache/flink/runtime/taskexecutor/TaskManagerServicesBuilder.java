@@ -30,6 +30,7 @@ import org.apache.flink.runtime.registration.RetryingRegistrationConfiguration;
 import org.apache.flink.runtime.shuffle.ShuffleEnvironment;
 import org.apache.flink.runtime.state.TaskExecutorChannelStateExecutorFactoryManager;
 import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager;
+import org.apache.flink.runtime.state.TaskExecutorSegmentSnapshotManager;
 import org.apache.flink.runtime.state.TaskExecutorStateChangelogStoragesManager;
 import org.apache.flink.runtime.taskexecutor.slot.NoOpSlotAllocationSnapshotPersistenceService;
 import org.apache.flink.runtime.taskexecutor.slot.SlotAllocationSnapshotPersistenceService;
@@ -58,8 +59,9 @@ public class TaskManagerServicesBuilder {
     private JobTable jobTable;
     private JobLeaderService jobLeaderService;
     private TaskExecutorLocalStateStoresManager taskStateManager;
-    private TaskExecutorStateChangelogStoragesManager taskChangelogStoragesManager;
     private TaskExecutorChannelStateExecutorFactoryManager taskChannelStateExecutorFactoryManager;
+    private TaskExecutorStateChangelogStoragesManager taskChangelogStoragesManager;
+    private TaskExecutorSegmentSnapshotManager taskSegmentSnapshotManager;
     private TaskEventDispatcher taskEventDispatcher;
     private LibraryCacheManager libraryCacheManager;
     private SharedResources sharedResources;
@@ -86,6 +88,7 @@ public class TaskManagerServicesBuilder {
         taskChangelogStoragesManager = mock(TaskExecutorStateChangelogStoragesManager.class);
         taskChannelStateExecutorFactoryManager =
                 new TaskExecutorChannelStateExecutorFactoryManager();
+        taskSegmentSnapshotManager = mock(TaskExecutorSegmentSnapshotManager.class);
         libraryCacheManager = TestingLibraryCacheManager.newBuilder().build();
         managedMemorySize = MemoryManager.MIN_PAGE_SIZE;
         this.slotAllocationSnapshotPersistenceService =
@@ -185,6 +188,7 @@ public class TaskManagerServicesBuilder {
                 taskStateManager,
                 taskChangelogStoragesManager,
                 taskChannelStateExecutorFactoryManager,
+                taskSegmentSnapshotManager,
                 taskEventDispatcher,
                 Executors.newSingleThreadScheduledExecutor(),
                 libraryCacheManager,

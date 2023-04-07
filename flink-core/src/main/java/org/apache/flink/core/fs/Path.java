@@ -305,6 +305,10 @@ public class Path implements IOReadableWritable, Serializable {
         return uri.getPath();
     }
 
+    public java.nio.file.Path getJavaPath() {
+        return new File(uri.getPath()).toPath();
+    }
+
     /**
      * Returns the parent of a path, i.e., everything that precedes the last separator or <code>null
      * </code> if at root.

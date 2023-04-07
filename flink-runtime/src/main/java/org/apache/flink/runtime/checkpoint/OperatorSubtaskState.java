@@ -220,6 +220,8 @@ public class OperatorSubtaskState implements CompositeStateHandle {
     public void registerSharedStates(SharedStateRegistry sharedStateRegistry, long checkpointID) {
         registerSharedState(sharedStateRegistry, managedKeyedState, checkpointID);
         registerSharedState(sharedStateRegistry, rawKeyedState, checkpointID);
+        registerSharedOperatorState(sharedStateRegistry, managedOperatorState, checkpointID);
+        registerSharedOperatorState(sharedStateRegistry, rawOperatorState, checkpointID);
     }
 
     private static void registerSharedState(
@@ -236,6 +238,18 @@ public class OperatorSubtaskState implements CompositeStateHandle {
                         new EmptyDiscardStateObjectForRegister(stateHandle.getStateHandleId()),
                         checkpointID);
                 stateHandle.registerSharedStates(sharedStateRegistry, checkpointID);
+            }
+        }
+    }
+
+    private static void registerSharedOperatorState(
+            SharedStateRegistry sharedStateRegistry,
+            Iterable<OperatorStateHandle> stateHandles,
+            long checkpointID) {
+        for (OperatorStateHandle stateHandle : stateHandles) {
+            if (stateHandle instanceof CompositeStateHandle) {
+                ((CompositeStateHandle) stateHandle)
+                        .registerSharedStates(sharedStateRegistry, checkpointID);
             }
         }
     }

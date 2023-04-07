@@ -24,6 +24,7 @@ import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
+import org.apache.flink.runtime.checkpoint.segmented.EmptyStateHandle;
 import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 import org.apache.flink.util.Preconditions;
 
@@ -65,7 +66,7 @@ public class OperatorStateRestoreOperation implements RestoreOperation<Void> {
 
         for (OperatorStateHandle stateHandle : stateHandles) {
 
-            if (stateHandle == null) {
+            if (stateHandle == null || stateHandle instanceof EmptyStateHandle) {
                 continue;
             }
 

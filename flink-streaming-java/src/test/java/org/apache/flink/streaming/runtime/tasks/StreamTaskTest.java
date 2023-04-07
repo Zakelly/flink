@@ -823,6 +823,7 @@ public class StreamTaskTest {
                         new InMemoryStateChangelogStorage(),
                         new TaskExecutorStateChangelogStoragesManager(),
                         null,
+                        null,
                         checkpointResponder);
 
         KeyedStateHandle managedKeyedStateHandle = mock(KeyedStateHandle.class);
@@ -1020,6 +1021,7 @@ public class StreamTaskTest {
                         mock(TaskLocalStateStoreImpl.class),
                         new InMemoryStateChangelogStorage(),
                         new TaskExecutorStateChangelogStoragesManager(),
+                        null,
                         null,
                         checkpointResponder);
 

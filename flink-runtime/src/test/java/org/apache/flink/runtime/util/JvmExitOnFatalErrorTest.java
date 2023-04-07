@@ -27,6 +27,8 @@ import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.runtime.blob.VoidPermanentBlobService;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriteRequestExecutorFactory;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentCheckpointUtils;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.deployment.InputGateDeploymentDescriptor;
 import org.apache.flink.runtime.deployment.ResultPartitionDeploymentDescriptor;
@@ -216,6 +218,10 @@ public class JvmExitOnFatalErrorTest extends TestLogger {
                 final StateChangelogStorage<?> changelogStorage =
                         new InMemoryStateChangelogStorage();
 
+                SegmentSnapshotManager ssm =
+                        SegmentCheckpointUtils.createSegmentSnapshotManager(
+                                allocationID.toString(), taskManagerConfig);
+
                 final TaskStateManager slotStateManager =
                         new TaskStateManagerImpl(
                                 jid,
@@ -223,6 +229,7 @@ public class JvmExitOnFatalErrorTest extends TestLogger {
                                 localStateStore,
                                 changelogStorage,
                                 new TaskExecutorStateChangelogStoragesManager(),
+                                ssm,
                                 null,
                                 mock(CheckpointResponder.class));
 

@@ -41,6 +41,7 @@ import org.apache.flink.runtime.checkpoint.SnapshotType;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.checkpoint.channel.InputChannelInfo;
 import org.apache.flink.runtime.checkpoint.channel.SequentialChannelStateReader;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.AvailabilityProvider;
@@ -69,8 +70,12 @@ import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.CheckpointStorageAccess;
 import org.apache.flink.runtime.state.CheckpointStorageLoader;
 import org.apache.flink.runtime.state.CheckpointStorageWorkerView;
+import org.apache.flink.runtime.state.DefaultOperatorStateBackend;
 import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.state.StateBackendLoader;
+import org.apache.flink.runtime.state.filesystem.FsCheckpointStorageAccess;
+import org.apache.flink.runtime.state.filesystem.FsSegmentCheckpointStorageAccess;
+import org.apache.flink.runtime.state.hashmap.HashMapStateBackend;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.runtime.taskmanager.AsyncExceptionHandler;
 import org.apache.flink.runtime.taskmanager.AsynchronousException;
@@ -314,6 +319,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
     @Nullable private final AvailabilityProvider changelogWriterAvailabilityProvider;
 
+    @Nullable private SegmentSnapshotManager segmentSnapshotManager;
+
     // ------------------------------------------------------------------------
 
     /**
@@ -456,6 +463,10 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
             CheckpointStorageAccess checkpointStorageAccess =
                     checkpointStorage.createCheckpointStorage(getEnvironment().getJobID());
+            checkpointStorageAccess =
+                    applySegmentCheckpointConfigurations(
+                            checkpointStorageAccess,
+                            environment.getTaskStateManager().getSegmentSnapshotManager());
 
             environment.setCheckpointStorageAccess(checkpointStorageAccess);
 
@@ -507,6 +518,50 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                 ex.addSuppressed(throwable);
             }
             throw ex;
+        }
+    }
+
+    public CheckpointStorageAccess applySegmentCheckpointConfigurations(
+            CheckpointStorageAccess checkpointStorageAccess,
+            SegmentSnapshotManager segmentSnapshotManager) {
+        if (segmentSnapshotManager == null || !segmentSnapshotManager.isEnabled()) {
+            return checkpointStorageAccess;
+        }
+
+        boolean stateBackendSupportsSegmented =
+                stateBackend instanceof DefaultOperatorStateBackend
+                        || stateBackend instanceof HashMapStateBackend
+                        || stateBackend.toString().startsWith("RocksDBStateBackend");
+        if (!stateBackendSupportsSegmented) {
+            LOG.warn(
+                    "Segmented checkpointing is not supported for state backend: {}, "
+                            + "Falling back to unsegmented mode.",
+                    stateBackend);
+            return checkpointStorageAccess;
+        }
+
+        if (!(checkpointStorageAccess instanceof FsCheckpointStorageAccess)) {
+            LOG.warn(
+                    "Unsupported storage access for segmented checkpoints: {}. "
+                            + "Falling back to unsegmented mode",
+                    checkpointStorageAccess.getClass());
+            return checkpointStorageAccess;
+        }
+
+        try {
+            FsSegmentCheckpointStorageAccess segmentCheckpointStorageAccess =
+                    ((FsCheckpointStorageAccess) checkpointStorageAccess)
+                            .toSegmented(segmentSnapshotManager, environment);
+            this.segmentSnapshotManager = segmentSnapshotManager;
+            return segmentCheckpointStorageAccess;
+        } catch (IOException e) {
+            LOG.warn(
+                    "Initiating FsSegmentCheckpointStorageAccess or SegmentSnapshotManager failed"
+                            + "with exception: {}",
+                    e.getMessage(),
+                    e);
+            this.segmentSnapshotManager = null;
+            return checkpointStorageAccess;
         }
     }
 
@@ -1397,6 +1452,11 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                     if (isCurrentSyncSavepoint(checkpointId)) {
                         throw new FlinkRuntimeException("Stop-with-savepoint failed.");
                     }
+                    if (segmentSnapshotManager != null) {
+                        segmentSnapshotManager.notifyCheckpointAborted(
+                                SegmentSnapshotManager.SubtaskKey.of(environment.getTaskInfo()),
+                                checkpointId);
+                    }
                     subtaskCheckpointCoordinator.notifyCheckpointAborted(
                             checkpointId, operatorChain, this::isRunning);
                 },
@@ -1442,6 +1502,10 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
         subtaskCheckpointCoordinator.notifyCheckpointComplete(
                 checkpointId, operatorChain, this::isRunning);
+        if (segmentSnapshotManager != null) {
+            segmentSnapshotManager.notifyCheckpointComplete(
+                    SegmentSnapshotManager.SubtaskKey.of(environment.getTaskInfo()), checkpointId);
+        }
         if (isRunning) {
             if (isCurrentSyncSavepoint(checkpointId)) {
                 finalCheckpointCompleted.complete(null);

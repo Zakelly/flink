@@ -93,7 +93,7 @@ public abstract class AbstractFsCheckpointStorageAccess implements CheckpointSto
     // ------------------------------------------------------------------------
 
     /** The jobId, written into the generated savepoint directories. */
-    private final JobID jobId;
+    protected final JobID jobId;
 
     /** The default location for savepoints. Null, if none is configured. */
     @Nullable private final Path defaultSavepointDirectory;

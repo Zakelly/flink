@@ -254,6 +254,7 @@ public class LocalStateForwardingTest extends TestLogger {
                         stateChangelogStorage,
                         new TaskExecutorStateChangelogStoragesManager(),
                         null,
+                        null,
                         checkpointResponder);
 
         taskStateManager.reportTaskStateSnapshots(

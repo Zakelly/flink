@@ -26,8 +26,10 @@ import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
 import org.apache.flink.runtime.event.AbstractEvent;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.network.api.StopMode;
@@ -44,6 +46,7 @@ import org.apache.flink.runtime.operators.coordination.OperatorEventDispatcher;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.SnapshotResult;
+import org.apache.flink.runtime.state.TaskStateManager;
 import org.apache.flink.streaming.api.graph.NonChainedOutput;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.graph.StreamEdge;
@@ -149,6 +152,40 @@ public abstract class OperatorChain<OUT, OP extends StreamOperator<OUT>>
     protected final @Nullable FinishedOnRestoreInput finishedOnRestoreInput;
 
     protected boolean isClosed;
+
+    public void restoreSegmentSnapshotManager(
+            SegmentSnapshotManager segmentSnapshotManager, Environment environment) {
+        if (segmentSnapshotManager != null) {
+            // restore states if necessary
+            // todo: no need to restore ssm in some cases, e.g. restoring in NO_CLAIM/LEGACY mode
+            try {
+                TaskStateManager taskStateManager = environment.getTaskStateManager();
+                Optional<Long> restoreCheckpointId = taskStateManager.getRestoreCheckpointId();
+                if (restoreCheckpointId.isPresent()) {
+                    long checkpointId = restoreCheckpointId.get();
+                    for (StreamOperatorWrapper<?, ?> operatorWrapper : getAllOperators(true)) {
+                        StreamOperator<?> operator = operatorWrapper.getStreamOperator();
+                        PrioritizedOperatorSubtaskState subtaskState =
+                                taskStateManager.prioritizedOperatorState(operator.getOperatorID());
+
+                        SegmentSnapshotManager.SubtaskKey subtaskKey =
+                                SegmentSnapshotManager.SubtaskKey.of(environment.getTaskInfo());
+                        segmentSnapshotManager.addKeyedStateHandles(
+                                subtaskKey,
+                                checkpointId,
+                                subtaskState.getPrioritizedManagedKeyedState());
+                        segmentSnapshotManager.addOperatorStateHandles(
+                                subtaskKey,
+                                checkpointId,
+                                subtaskState.getPrioritizedManagedOperatorState());
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Restoring segment snapshot manager failed with exception", e);
+                throw e;
+            }
+        }
+    }
 
     public OperatorChain(
             StreamTask<OUT, OP> containingTask,

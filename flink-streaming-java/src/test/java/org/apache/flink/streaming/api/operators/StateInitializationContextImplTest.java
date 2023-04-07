@@ -172,6 +172,7 @@ public class StateInitializationContextImplTest {
                         new TestTaskLocalStateStore(),
                         new InMemoryStateChangelogStorage(),
                         new TaskExecutorStateChangelogStoragesManager(),
+                        null,
                         jobManagerTaskRestore,
                         mock(CheckpointResponder.class));
 

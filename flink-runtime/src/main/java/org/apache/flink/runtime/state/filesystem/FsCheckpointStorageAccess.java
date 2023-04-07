@@ -23,6 +23,9 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.core.fs.DuplicatingFileSystem;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.runtime.checkpoint.segmented.SegmentSnapshotManager;
+import org.apache.flink.runtime.execution.Environment;
+import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.state.CheckpointStateOutputStream;
 import org.apache.flink.runtime.state.CheckpointStateToolset;
 import org.apache.flink.runtime.state.CheckpointStorageLocation;
@@ -41,17 +44,17 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** An implementation of durable checkpoint storage to file systems. */
 public class FsCheckpointStorageAccess extends AbstractFsCheckpointStorageAccess {
 
-    private final FileSystem fileSystem;
+    protected final FileSystem fileSystem;
 
-    private final Path checkpointsDirectory;
+    protected final Path checkpointsDirectory;
 
-    private final Path sharedStateDirectory;
+    protected final Path sharedStateDirectory;
 
-    private final Path taskOwnedStateDirectory;
+    protected final Path taskOwnedStateDirectory;
 
-    private final int fileSizeThreshold;
+    protected final int fileSizeThreshold;
 
-    private final int writeBufferSize;
+    protected final int writeBufferSize;
 
     private boolean baseLocationsInitialized = false;
 
@@ -89,6 +92,41 @@ public class FsCheckpointStorageAccess extends AbstractFsCheckpointStorageAccess
         this.fileSystem = checkNotNull(fs);
         this.checkpointsDirectory = getCheckpointDirectoryForJob(checkpointBaseDirectory, jobId);
         this.sharedStateDirectory = new Path(checkpointsDirectory, CHECKPOINT_SHARED_STATE_DIR);
+        this.taskOwnedStateDirectory =
+                new Path(checkpointsDirectory, CHECKPOINT_TASK_OWNED_STATE_DIR);
+        this.fileSizeThreshold = fileSizeThreshold;
+        this.writeBufferSize = writeBufferSize;
+    }
+
+    public FsCheckpointStorageAccess(
+            FileSystem fs,
+            Path checkpointBaseDirectory,
+            @Nullable Path defaultSavepointDirectory,
+            boolean createCheckpointSubDirs,
+            JobID jobId,
+            int fileSizeThreshold,
+            int writeBufferSize,
+            JobVertexID jobVertexId,
+            int subtaskIndex)
+            throws IOException {
+
+        super(jobId, defaultSavepointDirectory);
+
+        checkArgument(fileSizeThreshold >= 0);
+        checkArgument(writeBufferSize >= 0);
+
+        this.fileSystem = checkNotNull(fs);
+        Path jobCheckpointsDirectory =
+                (createCheckpointSubDirs
+                        ? getCheckpointDirectoryForJob(checkpointBaseDirectory, jobId)
+                        : checkpointBaseDirectory);
+        Path intermediateCheckpointsDirectory =
+                new Path(jobCheckpointsDirectory, "intermediate_checkpoints");
+        String subDirectory = jobVertexId + "_" + subtaskIndex;
+        this.checkpointsDirectory = new Path(intermediateCheckpointsDirectory, subDirectory);
+        // Shared states are shared between intermediate checkpoints and global checkpoints,
+        // so placed in the same path
+        this.sharedStateDirectory = new Path(jobCheckpointsDirectory, CHECKPOINT_SHARED_STATE_DIR);
         this.taskOwnedStateDirectory =
                 new Path(checkpointsDirectory, CHECKPOINT_TASK_OWNED_STATE_DIR);
         this.fileSizeThreshold = fileSizeThreshold;
@@ -200,5 +238,21 @@ public class FsCheckpointStorageAccess extends AbstractFsCheckpointStorageAccess
         final CheckpointStorageLocationReference reference = encodePathAsReference(location);
         return new FsCheckpointStorageLocation(
                 fs, location, location, location, reference, fileSizeThreshold, writeBufferSize);
+    }
+
+    public FsSegmentCheckpointStorageAccess toSegmented(
+            SegmentSnapshotManager segmentSnapshotManager, Environment environment)
+            throws IOException {
+        return new FsSegmentCheckpointStorageAccess(
+                fileSystem,
+                checkpointsDirectory,
+                sharedStateDirectory,
+                taskOwnedStateDirectory,
+                getDefaultSavepointDirectory(),
+                jobId,
+                fileSizeThreshold,
+                writeBufferSize,
+                segmentSnapshotManager,
+                environment);
     }
 }
