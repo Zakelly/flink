@@ -64,7 +64,7 @@ print_system_info
 ulimit -c unlimited
 
 # configure JVMs to produce heap dumps
-export JAVA_TOOL_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
+export JAVA_TOOL_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError -XX:+PrintFlagsFinal"
 
 # some tests provide additional logs if they find this variable
 export IS_CI=true
