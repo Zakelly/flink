@@ -22,6 +22,7 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.CheckpointStorageAccess;
 import org.apache.flink.runtime.state.CompletedCheckpointStorageLocation;
+import org.apache.flink.runtime.state.NonCheckpointingStorageAccess;
 
 /** A simple {@link CheckpointStorage} which is used in a BATCH style execution. */
 public class BatchExecutionCheckpointStorage implements CheckpointStorage {

@@ -70,6 +70,7 @@ import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.CheckpointStorageAccess;
 import org.apache.flink.runtime.state.CheckpointStorageLoader;
 import org.apache.flink.runtime.state.CheckpointStorageWorkerView;
+import org.apache.flink.runtime.state.NonCheckpointingStorageAccess;
 import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.state.StateBackendLoader;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
@@ -455,12 +456,17 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                                     .getStateChangelogStorage()
                                     .getAvailabilityProvider();
 
-            CheckpointStorageAccess checkpointStorageAccess =
-                    checkpointStorage.createCheckpointStorage(getEnvironment().getJobID());
-            checkpointStorageAccess =
-                    applyFileMergingCheckpoint(
-                            checkpointStorageAccess,
-                            environment.getTaskStateManager().getFileMergingSnapshotManager());
+            CheckpointStorageAccess checkpointStorageAccess;
+            if (configuration.isCheckpointingEnabled()) {
+                checkpointStorageAccess =
+                        checkpointStorage.createCheckpointStorage(getEnvironment().getJobID());
+                checkpointStorageAccess =
+                        applyFileMergingCheckpoint(
+                                checkpointStorageAccess,
+                                environment.getTaskStateManager().getFileMergingSnapshotManager());
+            } else {
+                checkpointStorageAccess = new NonCheckpointingStorageAccess();
+            }
             environment.setCheckpointStorageAccess(checkpointStorageAccess);
 
             // if the clock is not already set, then assign a default TimeServiceProvider
@@ -482,11 +488,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                             environment,
                             this,
                             configuration.isUnalignedCheckpointsEnabled(),
-                            configuration
-                                    .getConfiguration()
-                                    .get(
-                                            ExecutionCheckpointingOptions
-                                                    .ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH),
+                            areCheckpointsWithFinishedTasksEnabled(),
                             this::prepareInputSnapshot,
                             configuration.getMaxConcurrentCheckpoints(),
                             BarrierAlignmentUtil.createRegisterTimerCallback(
