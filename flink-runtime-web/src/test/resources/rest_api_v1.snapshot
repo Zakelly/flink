@@ -1436,7 +1436,7 @@
       "properties" : {
         "checkpointType" : {
           "type" : "string",
-          "enum" : [ "CONFIGURED", "FULL", "INCREMENTAL" ]
+          "enum" : [ "CONFIGURED", "FULL" ]
         },
         "triggerId" : {
           "type" : "any"
