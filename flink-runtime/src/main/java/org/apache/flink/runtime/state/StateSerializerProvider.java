@@ -23,6 +23,8 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.UnloadableDummyTypeSerializer;
+import org.apache.flink.runtime.state.ttl.TtlAwareSerializer;
+import org.apache.flink.runtime.state.ttl.TtlAwareSerializerSnapshotWrapper;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nonnull;
@@ -97,8 +99,13 @@ public abstract class StateSerializerProvider<T> {
      * @return a new {@link StateSerializerProvider}.
      */
     public static <T> StateSerializerProvider<T> fromPreviousSerializerSnapshot(
+            TypeSerializerSnapshot<T> stateSerializerSnapshot, boolean mayContainsTtl) {
+        return new LazilyRegisteredStateSerializerProvider<>(stateSerializerSnapshot, mayContainsTtl);
+    }
+
+    public static <T> StateSerializerProvider<T> fromPreviousSerializerSnapshot(
             TypeSerializerSnapshot<T> stateSerializerSnapshot) {
-        return new LazilyRegisteredStateSerializerProvider<>(stateSerializerSnapshot);
+        return fromPreviousSerializerSnapshot(stateSerializerSnapshot, false);
     }
 
     /**
@@ -113,8 +120,13 @@ public abstract class StateSerializerProvider<T> {
      * @return a new {@link StateSerializerProvider}.
      */
     public static <T> StateSerializerProvider<T> fromNewRegisteredSerializer(
+            TypeSerializer<T> registeredStateSerializer, boolean mayContainsTtl) {
+        return new EagerlyRegisteredStateSerializerProvider<>(registeredStateSerializer, mayContainsTtl);
+    }
+
+    public static <T> StateSerializerProvider<T> fromNewRegisteredSerializer(
             TypeSerializer<T> registeredStateSerializer) {
-        return new EagerlyRegisteredStateSerializerProvider<>(registeredStateSerializer);
+        return fromNewRegisteredSerializer(registeredStateSerializer, false);
     }
 
     private StateSerializerProvider(@Nonnull TypeSerializer<T> stateSerializer) {
@@ -287,9 +299,12 @@ public abstract class StateSerializerProvider<T> {
     private static class LazilyRegisteredStateSerializerProvider<T>
             extends StateSerializerProvider<T> {
 
+        private boolean mayContainsTtl;
+
         LazilyRegisteredStateSerializerProvider(
-                TypeSerializerSnapshot<T> previousSerializerSnapshot) {
+                TypeSerializerSnapshot<T> previousSerializerSnapshot, boolean mayContainsTtl) {
             super(Preconditions.checkNotNull(previousSerializerSnapshot));
+            this.mayContainsTtl = mayContainsTtl;
         }
 
         @Nonnull
@@ -303,10 +318,21 @@ public abstract class StateSerializerProvider<T> {
                         "A serializer has already been registered for the state; re-registration is not allowed.");
             }
 
-            TypeSerializerSchemaCompatibility<T> result =
-                    newSerializer
-                            .snapshotConfiguration()
-                            .resolveSchemaCompatibility(previousSerializerSnapshot);
+            TypeSerializerSchemaCompatibility<T> result;
+            if (mayContainsTtl) {
+                result =
+                        TtlAwareSerializer.wrapTtlAwareSerializer(newSerializer)
+                                .snapshotConfiguration()
+                                .resolveSchemaCompatibility(
+                                        new TtlAwareSerializerSnapshotWrapper(
+                                                previousSerializerSnapshot)
+                                                .getTtlAwareSerializerSnapshot());
+            } else {
+                result =
+                        newSerializer
+                                .snapshotConfiguration()
+                                .resolveSchemaCompatibility(previousSerializerSnapshot);
+            }
             if (result.isIncompatible()) {
                 invalidateCurrentSchemaSerializerAccess();
             }
@@ -335,8 +361,11 @@ public abstract class StateSerializerProvider<T> {
     private static class EagerlyRegisteredStateSerializerProvider<T>
             extends StateSerializerProvider<T> {
 
-        EagerlyRegisteredStateSerializerProvider(TypeSerializer<T> registeredStateSerializer) {
+        boolean mayContainsTtl;
+
+        EagerlyRegisteredStateSerializerProvider(TypeSerializer<T> registeredStateSerializer, boolean mayContainsTtl) {
             super(Preconditions.checkNotNull(registeredStateSerializer));
+            this.mayContainsTtl = mayContainsTtl;
         }
 
         @Nonnull
@@ -359,10 +388,21 @@ public abstract class StateSerializerProvider<T> {
 
             this.previousSerializerSnapshot = previousSerializerSnapshot;
 
-            TypeSerializerSchemaCompatibility<T> result =
-                    Preconditions.checkNotNull(registeredSerializer)
-                            .snapshotConfiguration()
-                            .resolveSchemaCompatibility(previousSerializerSnapshot);
+            TypeSerializerSchemaCompatibility<T> result;
+            if (mayContainsTtl) {
+                result =
+                        TtlAwareSerializer.wrapTtlAwareSerializer(registeredSerializer)
+                                .snapshotConfiguration()
+                                .resolveSchemaCompatibility(
+                                        new TtlAwareSerializerSnapshotWrapper(
+                                                previousSerializerSnapshot)
+                                                .getTtlAwareSerializerSnapshot());
+            } else {
+                result =
+                        Preconditions.checkNotNull(registeredSerializer)
+                                .snapshotConfiguration()
+                                .resolveSchemaCompatibility(previousSerializerSnapshot);
+            }
             if (result.isIncompatible()) {
                 invalidateCurrentSchemaSerializerAccess();
             }

@@ -32,6 +32,8 @@ import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.StateSnapshotTransformer;
 import org.apache.flink.runtime.state.internal.InternalMapState;
+import org.apache.flink.runtime.state.ttl.TtlAwareListSerializer;
+import org.apache.flink.runtime.state.ttl.TtlAwareMapSerializer;
 import org.apache.flink.runtime.state.ttl.TtlAwareSerializer;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -231,21 +233,13 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
             TtlTimeProvider ttlTimeProvider)
             throws StateMigrationException {
 
-        checkArgument(priorSerializer instanceof MapSerializer);
-        checkArgument(newSerializer instanceof MapSerializer);
-        checkArgument(
-                ((MapSerializer<UK, UV>) priorSerializer).getValueSerializer()
-                        instanceof TtlAwareSerializer);
-        checkArgument(
-                ((MapSerializer<UK, UV>) newSerializer).getValueSerializer()
-                        instanceof TtlAwareSerializer);
+        checkArgument(priorSerializer instanceof TtlAwareMapSerializer);
+        checkArgument(newSerializer instanceof TtlAwareMapSerializer);
 
-        TtlAwareSerializer<UV> priorTtlAwareMapValueSerializer =
-                (TtlAwareSerializer<UV>)
-                        ((MapSerializer<UK, UV>) priorSerializer).getValueSerializer();
-        TtlAwareSerializer<UV> newTtlAwareMapValueSerializer =
-                (TtlAwareSerializer<UV>)
-                        ((MapSerializer<UK, UV>) newSerializer).getValueSerializer();
+        TtlAwareSerializer<UV, ?> priorTtlAwareMapValueSerializer =
+                ((TtlAwareMapSerializer<UK, UV>) priorSerializer).getValueSerializer();
+        TtlAwareSerializer<UV, ?> newTtlAwareMapValueSerializer =
+                ((TtlAwareMapSerializer<UK, UV>) newSerializer).getValueSerializer();
 
         try {
             boolean isNull = serializedOldValueInput.readBoolean();

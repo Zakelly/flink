@@ -30,6 +30,7 @@ import org.apache.flink.runtime.state.ListDelimitedSerializer;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.StateSnapshotTransformer;
 import org.apache.flink.runtime.state.internal.InternalListState;
+import org.apache.flink.runtime.state.ttl.TtlAwareListSerializer;
 import org.apache.flink.runtime.state.ttl.TtlAwareSerializer;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -203,20 +204,13 @@ class RocksDBListState<K, N, V> extends AbstractRocksDBState<K, N, List<V>>
             TypeSerializer<List<V>> newSerializer,
             TtlTimeProvider ttlTimeProvider)
             throws StateMigrationException {
-        Preconditions.checkArgument(priorSerializer instanceof ListSerializer);
-        Preconditions.checkArgument(newSerializer instanceof ListSerializer);
-        Preconditions.checkArgument(
-                ((ListSerializer<V>) priorSerializer).getElementSerializer()
-                        instanceof TtlAwareSerializer);
-        Preconditions.checkArgument(
-                ((ListSerializer<V>) newSerializer).getElementSerializer()
-                        instanceof TtlAwareSerializer);
+        Preconditions.checkArgument(priorSerializer instanceof TtlAwareListSerializer);
+        Preconditions.checkArgument(newSerializer instanceof TtlAwareListSerializer);
 
-        TtlAwareSerializer<V> priorTtlAwareElementSerializer =
-                (TtlAwareSerializer<V>)
-                        ((ListSerializer<V>) priorSerializer).getElementSerializer();
-        TtlAwareSerializer<V> newTtlAwareElementSerializer =
-                (TtlAwareSerializer<V>) ((ListSerializer<V>) newSerializer).getElementSerializer();
+        TtlAwareSerializer<V, ?> priorTtlAwareElementSerializer =
+                        ((TtlAwareListSerializer<V>) priorSerializer).getElementSerializer();
+        TtlAwareSerializer<V, ?> newTtlAwareElementSerializer =
+                ((TtlAwareListSerializer<V>) newSerializer).getElementSerializer();
 
         try {
             while (serializedOldValueInput.available() > 0) {

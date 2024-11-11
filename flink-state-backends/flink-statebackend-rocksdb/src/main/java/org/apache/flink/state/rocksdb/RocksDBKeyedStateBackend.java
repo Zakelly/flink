@@ -681,9 +681,7 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 
         RocksDbKvStateInfo oldStateInfo = kvStateInformation.get(stateDesc.getName());
 
-        TypeSerializer<SV> stateSerializer =
-                (TypeSerializer<SV>)
-                        TtlAwareSerializer.wrapTtlAwareSerializer(stateDesc.getSerializer());
+        TypeSerializer<SV> stateSerializer = stateDesc.getSerializer();
 
         RocksDbKvStateInfo newRocksStateInfo;
         RegisteredKeyValueStateBackendMetaInfo<N, SV> newMetaInfo;
@@ -863,10 +861,13 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
             DataInputDeserializer serializedValueInput = new DataInputDeserializer();
             DataOutputSerializer migratedSerializedValueOutput = new DataOutputSerializer(512);
 
+            TtlAwareSerializer<SV, ?> previousTtlAwareSerializer = (TtlAwareSerializer<SV, ?>) TtlAwareSerializer.wrapTtlAwareSerializer(stateMetaInfo.f1.getPreviousStateSerializer());
+            TtlAwareSerializer<SV, ?> currentTtlAwareSerializer = (TtlAwareSerializer<SV, ?>) TtlAwareSerializer.wrapTtlAwareSerializer(stateMetaInfo.f1.getPreviousStateSerializer());
+
             // Check if it is ttl state migration
             if (TtlAwareSerializer.needTtlStateMigration(
-                    stateMetaInfo.f1.getPreviousStateSerializer(),
-                    stateMetaInfo.f1.getStateSerializer())) {
+                    previousTtlAwareSerializer,
+                    currentTtlAwareSerializer)) {
                 // By performing ttl state migration, we need to recreate column family to
                 // enable/disable ttl compaction filter factory.
                 db.dropColumnFamily(stateMetaInfo.f0);
@@ -888,8 +889,8 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
                 rocksDBState.migrateSerializedValue(
                         serializedValueInput,
                         migratedSerializedValueOutput,
-                        stateMetaInfo.f1.getPreviousStateSerializer(),
-                        stateMetaInfo.f1.getStateSerializer(),
+                        previousTtlAwareSerializer,
+                        currentTtlAwareSerializer,
                         this.ttlTimeProvider);
 
                 batchWriter.put(

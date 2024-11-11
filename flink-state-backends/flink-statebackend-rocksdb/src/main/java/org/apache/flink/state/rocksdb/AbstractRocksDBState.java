@@ -193,8 +193,8 @@ public abstract class AbstractRocksDBState<K, N, V> implements InternalKvState<K
             throws StateMigrationException {
         checkArgument(priorSerializer instanceof TtlAwareSerializer);
         checkArgument(newSerializer instanceof TtlAwareSerializer);
-        TtlAwareSerializer<V> ttlAwarePriorSerializer = (TtlAwareSerializer<V>) priorSerializer;
-        TtlAwareSerializer<V> ttlAwareNewSerializer = (TtlAwareSerializer<V>) newSerializer;
+        TtlAwareSerializer<V, ?> ttlAwarePriorSerializer = (TtlAwareSerializer<V, ?>) priorSerializer;
+        TtlAwareSerializer<V, ?> ttlAwareNewSerializer = (TtlAwareSerializer<V, ?>) newSerializer;
 
         try {
             ttlAwareNewSerializer.migrateValueFromPriorSerializer(

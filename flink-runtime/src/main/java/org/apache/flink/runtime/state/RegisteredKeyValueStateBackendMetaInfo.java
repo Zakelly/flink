@@ -64,7 +64,6 @@ public class RegisteredKeyValueStateBackendMetaInfo<N, S> extends RegisteredStat
                 StateSnapshotTransformFactory.noTransform());
     }
 
-    @SuppressWarnings("unchecked")
     public RegisteredKeyValueStateBackendMetaInfo(
             @Nonnull StateDescriptor.Type stateType,
             @Nonnull String name,
@@ -76,9 +75,7 @@ public class RegisteredKeyValueStateBackendMetaInfo<N, S> extends RegisteredStat
                 stateType,
                 name,
                 StateSerializerProvider.fromNewRegisteredSerializer(namespaceSerializer),
-                StateSerializerProvider.fromNewRegisteredSerializer(
-                        (TypeSerializer<S>)
-                                TtlAwareSerializer.wrapTtlAwareSerializer(stateSerializer)),
+                StateSerializerProvider.fromNewRegisteredSerializer(stateSerializer, true),
                 stateSnapshotTransformFactory);
     }
 
@@ -98,12 +95,10 @@ public class RegisteredKeyValueStateBackendMetaInfo<N, S> extends RegisteredStat
                 StateSerializerProvider.fromPreviousSerializerSnapshot(
                         (TypeSerializerSnapshot<S>)
                                 Preconditions.checkNotNull(
-                                        new TtlAwareSerializerSnapshotWrapper<>(
-                                                        snapshot.getTypeSerializerSnapshot(
-                                                                StateMetaInfoSnapshot
-                                                                        .CommonSerializerKeys
-                                                                        .VALUE_SERIALIZER))
-                                                .getTtlAwareSerializerSnapshot())),
+                                        snapshot.getTypeSerializerSnapshot(
+                                                StateMetaInfoSnapshot.CommonSerializerKeys
+                                                        .VALUE_SERIALIZER)),
+                        true),
                 StateSnapshotTransformFactory.noTransform());
 
         Preconditions.checkState(
@@ -149,6 +144,12 @@ public class RegisteredKeyValueStateBackendMetaInfo<N, S> extends RegisteredStat
     @Nonnull
     public TypeSerializer<S> getStateSerializer() {
         return stateSerializerProvider.currentSchemaSerializer();
+    }
+
+    @Nonnull
+    public TypeSerializer<S> getTtlAwareStateSerializer() {
+        TypeSerializer<S> serializer = stateSerializerProvider.currentSchemaSerializer();
+        return (TtlAwareSerializer<S, ?>) TtlAwareSerializer.wrapTtlAwareSerializer(serializer);
     }
 
     @Nonnull

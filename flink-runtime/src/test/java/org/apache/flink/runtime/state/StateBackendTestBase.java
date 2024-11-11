@@ -1162,7 +1162,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> {
             InternalKvState internalKvState = (InternalKvState) state;
             KryoSerializer<TestPojo> kryoSerializer =
                     (KryoSerializer<TestPojo>)
-                            ((TtlAwareSerializer<TestPojo>) internalKvState.getValueSerializer())
+                            ((TtlAwareSerializer<TestPojo, ?>) internalKvState.getValueSerializer())
                                     .getOriginalTypeSerializer();
             int mainPojoClassRegistrationId =
                     kryoSerializer.getKryo().getRegistration(TestPojo.class).getId();

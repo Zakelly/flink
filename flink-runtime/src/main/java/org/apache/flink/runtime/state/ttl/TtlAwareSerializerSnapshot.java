@@ -83,7 +83,7 @@ public class TtlAwareSerializerSnapshot<T> implements TypeSerializerSnapshot<T> 
 
     @Override
     public TypeSerializer<T> restoreSerializer() {
-        return new TtlAwareSerializer<>(typeSerializerSnapshot.restoreSerializer());
+        return new TtlAwareSerializer<>(typeSerializerSnapshot.restoreSerializer(), isTtlEnabled);
     }
 
     @Override

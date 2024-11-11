@@ -19,37 +19,34 @@
 package org.apache.flink.runtime.state.ttl;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.MapSerializer;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.util.function.SupplierWithException;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 
 /**
- * The list version of TtlAwareSerializer.
- * @param <T>
+ * The map version of TtlAwareSerializer.
  */
-public class TtlAwareListSerializer<T> extends TtlAwareSerializer<List<T>, ListSerializer<T>> {
+public class TtlAwareMapSerializer<K, V> extends TtlAwareSerializer<Map<K, V>, MapSerializer<K, V>> {
 
-    public TtlAwareListSerializer(ListSerializer<T> typeSerializer) {
+
+    public TtlAwareMapSerializer(MapSerializer<K, V> typeSerializer) {
         super(typeSerializer);
     }
 
     // ------------------------------------------------------------------------
-    //  ListSerializer specific properties
+    //  MapSerializer specific properties
     // ------------------------------------------------------------------------
 
-    /**
-     * Gets the serializer for the elements of the list.
-     *
-     * @return The serializer for the elements of the list
-     */
-    public TypeSerializer<T> getElementSerializer() {
-        return getOriginalTypeSerializer().getElementSerializer();
+    @SuppressWarnings("unchecked")
+    public TtlAwareSerializer<K, TypeSerializer<K>> getKeySerializer() {
+        return (TtlAwareSerializer<K, TypeSerializer<K>>) TtlAwareSerializer.wrapTtlAwareSerializer(getOriginalTypeSerializer().getKeySerializer());
     }
+
+    @SuppressWarnings("unchecked")
+    public TtlAwareSerializer<V, TypeSerializer<V>> getValueSerializer() {
+        return (TtlAwareSerializer<V, TypeSerializer<V>>) TtlAwareSerializer.wrapTtlAwareSerializer(getOriginalTypeSerializer().getValueSerializer());
+    }
+
 }

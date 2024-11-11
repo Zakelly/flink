@@ -27,167 +27,30 @@ import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.util.function.SupplierWithException;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 
 /**
- * This class wraps a {@link TypeSerializer} with ttl awareness. It will return true when the
- * wrapped {@link TypeSerializer} is instance of {@link TtlStateFactory.TtlSerializer}. Also, it
- * wraps the value migration process between TtlSerializer and non-ttl typeSerializer.
+ * The list version of TtlAwareSerializer.
+ * @param <T>
  */
-public class TtlAwareSerializer<T, ORI extends TypeSerializer<T>> extends TypeSerializer<T> {
+public class TtlAwareListSerializer<T> extends TtlAwareSerializer<List<T>, ListSerializer<T>> {
 
-    private final boolean isTtlEnabled;
-
-    private final ORI typeSerializer;
-
-    public TtlAwareSerializer(ORI typeSerializer) {
-        this.typeSerializer = typeSerializer;
-        this.isTtlEnabled = typeSerializer instanceof TtlStateFactory.TtlSerializer;
+    public TtlAwareListSerializer(ListSerializer<T> typeSerializer) {
+        super(typeSerializer);
     }
 
-    @Override
-    public boolean isImmutableType() {
-        return typeSerializer.isImmutableType();
-    }
+    // ------------------------------------------------------------------------
+    //  ListSerializer specific properties
+    // ------------------------------------------------------------------------
 
-    @Override
-    public TypeSerializer<T> duplicate() {
-        return new TtlAwareSerializer<>(typeSerializer.duplicate());
-    }
-
-    @Override
-    public T createInstance() {
-        return typeSerializer.createInstance();
-    }
-
-    @Override
-    public T copy(T from) {
-        return typeSerializer.copy(from);
-    }
-
-    @Override
-    public T copy(T from, T reuse) {
-        return typeSerializer.copy(from, reuse);
-    }
-
-    @Override
-    public int getLength() {
-        return typeSerializer.getLength();
-    }
-
-    @Override
-    public void serialize(T record, DataOutputView target) throws IOException {
-        typeSerializer.serialize(record, target);
-    }
-
-    @Override
-    public T deserialize(DataInputView source) throws IOException {
-        return typeSerializer.deserialize(source);
-    }
-
-    @Override
-    public T deserialize(T reuse, DataInputView source) throws IOException {
-        return typeSerializer.deserialize(reuse, source);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        TtlAwareSerializer<?> that = (TtlAwareSerializer<?>) o;
-        return isTtlEnabled == that.isTtlEnabled
-                && Objects.equals(typeSerializer, that.typeSerializer);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(isTtlEnabled, typeSerializer);
-    }
-
+    /**
+     * Gets the serializer for the elements of the list.
+     *
+     * @return The serializer for the elements of the list
+     */
     @SuppressWarnings("unchecked")
-    public void migrateValueFromPriorSerializer(
-            TtlAwareSerializer<T> priorTtlAwareSerializer,
-            SupplierWithException<T, IOException> inputSupplier,
-            DataOutputView target,
-            TtlTimeProvider ttlTimeProvider)
-            throws IOException {
-        T outputRecord;
-        if (this.isTtlEnabled()) {
-            outputRecord =
-                    priorTtlAwareSerializer.isTtlEnabled
-                            ? inputSupplier.get()
-                            : (T)
-                                    new TtlValue<>(
-                                            inputSupplier.get(),
-                                            ttlTimeProvider.currentTimestamp());
-        } else {
-            outputRecord =
-                    priorTtlAwareSerializer.isTtlEnabled
-                            ? ((TtlValue<T>) inputSupplier.get()).getUserValue()
-                            : inputSupplier.get();
-        }
-        this.serialize(outputRecord, target);
-    }
-
-    @Override
-    public void copy(DataInputView source, DataOutputView target) throws IOException {
-        typeSerializer.copy(source, target);
-    }
-
-    public boolean isTtlEnabled() {
-        return isTtlEnabled;
-    }
-
-    public TypeSerializer<T> getOriginalTypeSerializer() {
-        return typeSerializer;
-    }
-
-    @Override
-    public TypeSerializerSnapshot<T> snapshotConfiguration() {
-        return new TtlAwareSerializerSnapshot<>(
-                typeSerializer.snapshotConfiguration(), isTtlEnabled);
-    }
-
-    public static boolean isSerializerTtlEnabled(TypeSerializer<?> typeSerializer) {
-        TypeSerializer<?> wrappedTypeSerializer = wrapTtlAwareSerializer(typeSerializer);
-        return wrappedTypeSerializer instanceof TtlAwareSerializer
-                        && ((TtlAwareSerializer<?, ?>) wrappedTypeSerializer).isTtlEnabled();
-    }
-
-    public static boolean needTtlStateMigration(
-            TypeSerializer<?> previousSerializer, TypeSerializer<?> newSerializer) {
-        return TtlAwareSerializer.isSerializerTtlEnabled(previousSerializer)
-                != TtlAwareSerializer.isSerializerTtlEnabled(newSerializer);
-    }
-
-    public static TypeSerializer<?> wrapTtlAwareSerializer(TypeSerializer<?> typeSerializer) {
-        if (typeSerializer instanceof TtlAwareSerializer) {
-            return typeSerializer;
-        }
-
-        if (typeSerializer instanceof ListSerializer) {
-            return ((ListSerializer<?>) typeSerializer).getElementSerializer()
-                            instanceof TtlAwareSerializer
-                    ? typeSerializer
-                    : new ListSerializer<>(
-                            new TtlAwareSerializer<>(
-                                    ((ListSerializer<?>) typeSerializer).getElementSerializer()));
-        }
-
-        if (typeSerializer instanceof MapSerializer) {
-            return ((MapSerializer<?, ?>) typeSerializer).getValueSerializer()
-                            instanceof TtlAwareSerializer
-                    ? typeSerializer
-                    : new MapSerializer<>(
-                            ((MapSerializer<?, ?>) typeSerializer).getKeySerializer(),
-                            new TtlAwareSerializer<>(
-                                    ((MapSerializer<?, ?>) typeSerializer).getValueSerializer()));
-        }
-
-        return new TtlAwareSerializer<>(typeSerializer);
+    public TtlAwareSerializer<T, TypeSerializer<T>> getElementSerializer() {
+        return (TtlAwareSerializer<T, TypeSerializer<T>>) TtlAwareSerializer.wrapTtlAwareSerializer(getOriginalTypeSerializer().getElementSerializer());
     }
 }
