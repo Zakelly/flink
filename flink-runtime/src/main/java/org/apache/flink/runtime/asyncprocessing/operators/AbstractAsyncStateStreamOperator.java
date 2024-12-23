@@ -305,7 +305,7 @@ public abstract class AbstractAsyncStateStreamOperator<OUT> extends AbstractStre
 
     @Override
     public Object getCurrentKey() {
-        return currentProcessingContext.getKey();
+        return asyncExecutionController.getCurrentContext().getKey();
     }
 
     // ------------------------------------------------------------------------
