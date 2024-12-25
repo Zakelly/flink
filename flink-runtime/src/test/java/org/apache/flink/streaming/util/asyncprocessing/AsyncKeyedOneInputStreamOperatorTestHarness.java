@@ -34,7 +34,7 @@ import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
-import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.util.function.ThrowingConsumer;
 
 import java.util.ArrayList;
@@ -54,7 +54,7 @@ import static org.apache.flink.util.Preconditions.checkState;
  * async processing, please use methods of test harness instead of operator.
  */
 public class AsyncKeyedOneInputStreamOperatorTestHarness<K, IN, OUT>
-        extends AbstractStreamOperatorTestHarness<OUT> {
+        extends OneInputStreamOperatorTestHarness<IN, OUT> {
 
     /** Empty if the {@link #operator} is not {@link MultipleInputStreamOperator}. */
     private final List<Input> inputs = new ArrayList<>();
