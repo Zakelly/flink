@@ -42,6 +42,8 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
 
     private static final String FORST_CACHE_PREFIX = "forst.fileCache";
 
+    private static final ThreadLocal<Boolean> isFlinkThread = ThreadLocal.withInitial(() -> false);
+
     /** The file system of cache. */
     final FileSystem cacheFs;
 
@@ -86,6 +88,24 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
                 cacheLimitPolicy);
     }
 
+    public static void setFlinkThread() {
+        isFlinkThread.set(true);
+    }
+
+    public boolean incHitCounter() {
+        if (hitCounter != null && isFlinkThread.get()) {
+            hitCounter.inc();
+            return true;
+        }
+        return false;
+    }
+
+    public void incMissCounter() {
+        if (missCounter != null && isFlinkThread.get()) {
+            missCounter.inc();
+        }
+    }
+
     Path getCachePath(Path fromOriginal) {
         return new Path(basePath, fromOriginal.getName());
     }
@@ -125,13 +145,6 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
 
     @Override
     FileCacheEntry internalGet(String key, FileCacheEntry value) {
-        if (metricGroup != null) {
-            if (value != null) {
-                hitCounter.inc();
-            } else {
-                missCounter.inc();
-            }
-        }
         return value;
     }
 

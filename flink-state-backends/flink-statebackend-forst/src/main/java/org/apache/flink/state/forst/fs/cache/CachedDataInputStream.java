@@ -56,6 +56,8 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
 
     private Semaphore semaphore;
 
+    private FileBasedCache fileBasedCache = null;
+
     public CachedDataInputStream(
             FileCacheEntry cacheEntry,
             FSDataInputStream cacheStream,
@@ -67,8 +69,25 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
         this.semaphore = new Semaphore(0);
     }
 
+    public CachedDataInputStream(FSDataInputStream originalStream) {
+        this.cacheEntry = null;
+        this.fsdis = null;
+        this.originalStream = originalStream;
+        this.streamStatus = StreamStatus.ORIGINAL;
+        this.semaphore = new Semaphore(0);
+    }
+
+    public void setFileBasedCache(FileBasedCache fileBasedCache) {
+        this.fileBasedCache = fileBasedCache;
+    }
+
     private FSDataInputStream getStream() throws IOException {
         if (streamStatus == StreamStatus.CACHED_OPEN && cacheEntry.tryRetain() > 0) {
+            if (fileBasedCache != null) {
+                if (fileBasedCache.incHitCounter()) {
+                    cacheEntry.touch();
+                }
+            }
             return fsdis;
         } else if (streamStatus != StreamStatus.ORIGINAL) {
             try {
@@ -79,8 +98,14 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
             originalStream.seek(position);
             position = -1;
             streamStatus = StreamStatus.ORIGINAL;
+            if (fileBasedCache != null) {
+                fileBasedCache.incMissCounter();
+            }
             return originalStream;
         } else {
+            if (fileBasedCache != null) {
+                fileBasedCache.incMissCounter();
+            }
             return originalStream;
         }
     }

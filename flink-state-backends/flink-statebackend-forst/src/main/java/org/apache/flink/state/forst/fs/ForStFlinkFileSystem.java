@@ -208,6 +208,10 @@ public class ForStFlinkFileSystem extends FileSystem {
                     FSDataInputStream inputStream = source.openInputStream(bufferSize);
                     CachedDataInputStream cachedDataInputStream =
                             createCachedDataInputStream(dbFilePath, source, inputStream);
+                    if (cachedDataInputStream == null) {
+                        cachedDataInputStream = new CachedDataInputStream(inputStream);
+                    }
+                    cachedDataInputStream.setFileBasedCache(fileBasedCache);
                     return cachedDataInputStream == null ? inputStream : cachedDataInputStream;
                 },
                 DEFAULT_INPUT_STREAM_CAPACITY,
@@ -226,6 +230,10 @@ public class ForStFlinkFileSystem extends FileSystem {
                     FSDataInputStream inputStream = source.openInputStream();
                     CachedDataInputStream cachedDataInputStream =
                             createCachedDataInputStream(dbFilePath, source, inputStream);
+                    if (cachedDataInputStream == null) {
+                        cachedDataInputStream = new CachedDataInputStream(inputStream);
+                    }
+                    cachedDataInputStream.setFileBasedCache(fileBasedCache);
                     return cachedDataInputStream == null ? inputStream : cachedDataInputStream;
                 },
                 DEFAULT_INPUT_STREAM_CAPACITY,

@@ -39,6 +39,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class FileCacheEntry extends ReferenceCounted {
     private static final Logger LOG = LoggerFactory.getLogger(FileCacheEntry.class);
 
+    final FileBasedCache fileBasedCache;
+
     /** The file system of cache. */
     final FileSystem cacheFs;
 
@@ -55,15 +57,19 @@ public class FileCacheEntry extends ReferenceCounted {
 
     final Queue<CachedDataInputStream> openedStreams;
 
+    final String cacheKey;
+
     FileCacheEntry(
             FileBasedCache fileBasedCache, Path originalPath, Path cachePath, long entrySize) {
         super(1);
+        this.fileBasedCache = fileBasedCache;
         this.cacheFs = fileBasedCache.cacheFs;
         this.originalPath = originalPath;
         this.cachePath = cachePath;
         this.entrySize = entrySize;
         this.closed = false;
         this.openedStreams = new LinkedBlockingQueue<>();
+        this.cacheKey = cachePath.toString();
     }
 
     public CachedDataInputStream open(FSDataInputStream originalStream) throws IOException {
@@ -76,6 +82,10 @@ public class FileCacheEntry extends ReferenceCounted {
         } else {
             return null;
         }
+    }
+
+    public void touch() {
+        fileBasedCache.get(cacheKey);
     }
 
     public void invalidate() {

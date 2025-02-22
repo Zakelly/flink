@@ -21,6 +21,7 @@ package org.apache.flink.state.forst;
 import org.apache.flink.runtime.asyncprocessing.StateExecutor;
 import org.apache.flink.runtime.asyncprocessing.StateRequest;
 import org.apache.flink.runtime.asyncprocessing.StateRequestContainer;
+import org.apache.flink.state.forst.fs.cache.FileBasedCache;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 import org.apache.flink.util.concurrent.FutureUtils;
@@ -41,6 +42,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.flink.state.forst.ForStStateRequestClassifier.convertRequests;
+import static org.apache.flink.state.forst.fs.cache.FileBasedCache.setFlinkThread;
 
 /**
  * The {@link StateExecutor} implementation which executing batch {@link StateRequest}s for
@@ -133,6 +135,16 @@ public class ForStStateExecutor implements StateExecutor {
         this.db = db;
         this.writeOptions = writeOptions;
         this.ongoing = new AtomicLong();
+        initThreads();
+    }
+
+    private void initThreads() {
+        for (int i = 0; i < readThreadCount * 2; i++) {
+            readThreads.submit(FileBasedCache::setFlinkThread);
+        }
+        for (int i = 0; i < 2; i++) {
+            writeThreads.submit(FileBasedCache::setFlinkThread);
+        }
     }
 
     @Override
