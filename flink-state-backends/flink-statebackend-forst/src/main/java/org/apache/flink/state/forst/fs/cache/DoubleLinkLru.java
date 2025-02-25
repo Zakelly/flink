@@ -129,6 +129,7 @@ public abstract class DoubleLinkLru {
                 } else {
                     addToSecondLink(value);
                     outOfCache.put(value.cacheKey, value);
+                    moveOutOfCache(value);
                 }
             }
         };
@@ -139,6 +140,7 @@ public abstract class DoubleLinkLru {
             @Override
             void internalRemove(FileCacheEntry value) {
                 outOfCache.put(value.cacheKey, value);
+                moveOutOfCache(value);
             }
         };
         outOfCache = new HashMap<>();
@@ -164,11 +166,14 @@ public abstract class DoubleLinkLru {
     public synchronized FileCacheEntry get(String key) {
         FileCacheEntry value = firstLink.get(key);
         if (value == null) {
-            value = secondLink.remove(key);
+            value = secondLink.get(key);
             if (value != null) {
-                updateSecondLinkCountLimit(0);
-                firstLink.put(key, value);
-                addToFirstLink(value);
+                if (whetherToPromoteToFirstLink(value)) {
+                    secondLink.remove(key);
+                    updateSecondLinkCountLimit(0);
+                    firstLink.put(key, value);
+                    addToFirstLink(value);
+                }
             } else {
                 // out of cache
                 value = outOfCache.remove(key);
@@ -207,4 +212,8 @@ public abstract class DoubleLinkLru {
     abstract void addToFirstLink(FileCacheEntry value);
 
     abstract void internalRemove(FileCacheEntry value);
+
+    abstract boolean whetherToPromoteToFirstLink(FileCacheEntry value);
+
+    abstract void moveOutOfCache(FileCacheEntry value);
 }

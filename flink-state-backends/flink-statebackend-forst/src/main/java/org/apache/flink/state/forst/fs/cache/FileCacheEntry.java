@@ -65,6 +65,8 @@ public class FileCacheEntry extends ReferenceCounted {
 
     final AtomicReference<EntryStatus> status;
 
+    volatile int promoteCount = 0;
+
     public enum EntryStatus {
         LOADED,
         LOADING,

@@ -171,12 +171,23 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         Path cachePath = getCachePath(originalPath);
         FileCacheEntry fileCacheEntry =
                 new FileCacheEntry(this, originalPath, cachePath, size);
+        fileCacheEntry.promoteCount = 5;
         put(cachePath.toString(), fileCacheEntry);
     }
 
     @Override
     void internalRemove(FileCacheEntry value) {
         value.invalidate();
+    }
+
+    @Override
+    boolean whetherToPromoteToFirstLink(FileCacheEntry value) {
+        return ++value.promoteCount > 5;
+    }
+
+    @Override
+    void moveOutOfCache(FileCacheEntry value) {
+        value.promoteCount = 0;
     }
 
     @Override
