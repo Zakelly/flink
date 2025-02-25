@@ -28,6 +28,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Semaphore;
 
+import static org.apache.flink.state.forst.fs.cache.FileBasedCache.isFlinkThread;
+
 /**
  * A {@link FSDataInputStream} delegates requests to other one and supports reading data with {@link
  * ByteBuffer}. One CachedDataInputStream only supports one thread reading which is guaranteed by
@@ -56,63 +58,109 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
 
     private Semaphore semaphore;
 
-    private FileBasedCache fileBasedCache = null;
+    private final FileBasedCache fileBasedCache;
+
+    private boolean closed = false;
 
     public CachedDataInputStream(
+            FileBasedCache fileBasedCache,
             FileCacheEntry cacheEntry,
             FSDataInputStream cacheStream,
             FSDataInputStream originalStream) {
+        this.fileBasedCache = fileBasedCache;
         this.cacheEntry = cacheEntry;
         this.fsdis = cacheStream;
         this.originalStream = originalStream;
         this.streamStatus = StreamStatus.CACHED_OPEN;
         this.semaphore = new Semaphore(0);
+        LOG.info("Create CachedDataInputStream for {} with CACHED_OPEN", cacheEntry.cachePath);
     }
 
-    public CachedDataInputStream(FSDataInputStream originalStream) {
-        this.cacheEntry = null;
+    public CachedDataInputStream(FileBasedCache fileBasedCache, FileCacheEntry cacheEntry, FSDataInputStream originalStream) {
+        this.fileBasedCache = fileBasedCache;
+        this.cacheEntry = cacheEntry;
         this.fsdis = null;
         this.originalStream = originalStream;
-        this.streamStatus = StreamStatus.ORIGINAL;
+        this.streamStatus = StreamStatus.CACHED_CLOSED;
         this.semaphore = new Semaphore(0);
-    }
-
-    public void setFileBasedCache(FileBasedCache fileBasedCache) {
-        this.fileBasedCache = fileBasedCache;
+        LOG.info("Create CachedDataInputStream for {} with CACHED_CLOSED", cacheEntry.cachePath);
     }
 
     private FSDataInputStream getStream() throws IOException {
-        if (streamStatus == StreamStatus.CACHED_OPEN && cacheEntry.tryRetain() > 0) {
-            if (fileBasedCache != null) {
-                if (fileBasedCache.incHitCounter()) {
-                    cacheEntry.touch();
+        if (isFlinkThread()) {
+            cacheEntry.touch();
+        }
+        FSDataInputStream stream = tryGetCacheStream();
+        if (stream != null) {
+            fileBasedCache.incHitCounter();
+            return stream;
+        }
+
+        if (streamStatus == StreamStatus.CACHED_CLOSED
+                || streamStatus == StreamStatus.CACHED_CLOSING) {
+            if (streamStatus == StreamStatus.CACHED_CLOSING) {
+                try {
+                    semaphore.acquire(1);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
                 }
+                originalStream.seek(position);
+                position = -1;
+                LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSED);
+                streamStatus = StreamStatus.CACHED_CLOSED;
             }
-            return fsdis;
-        } else if (streamStatus != StreamStatus.ORIGINAL) {
-            try {
-                semaphore.acquire(1);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
+            // try reopen
+            tryReopen();
+            stream = tryGetCacheStream();
+            if (stream != null) {
+                fileBasedCache.incHitCounter();
+                return stream;
             }
-            originalStream.seek(position);
-            position = -1;
-            streamStatus = StreamStatus.ORIGINAL;
-            if (fileBasedCache != null) {
-                fileBasedCache.incMissCounter();
-            }
+            fileBasedCache.incMissCounter();
+            return originalStream;
+        } else if (streamStatus == StreamStatus.ORIGINAL) {
+            fileBasedCache.incMissCounter();
             return originalStream;
         } else {
-            if (fileBasedCache != null) {
-                fileBasedCache.incMissCounter();
+            if (streamStatus == StreamStatus.CACHED_OPEN && cacheEntry.status.get() == FileCacheEntry.EntryStatus.LOADED) {
+                stream = tryGetCacheStream();
+                if (stream != null) {
+                    fileBasedCache.incHitCounter();
+                    return stream;
+                }
             }
+            fileBasedCache.incMissCounter();
             return originalStream;
         }
     }
 
-    private void closeStream() throws IOException {
+    private FSDataInputStream tryGetCacheStream() {
+        if (streamStatus == StreamStatus.CACHED_OPEN && cacheEntry.tryRetain() > 0) {
+            return fsdis;
+        }
+        return null;
+    }
+
+    private void tryReopen() {
+        if (streamStatus == StreamStatus.CACHED_CLOSED && isFlinkThread()) {
+            try {
+                fsdis = cacheEntry.getCacheStream();
+                if (fsdis != null) {
+                    LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_OPEN);
+                    fsdis.seek(originalStream.getPos());
+                    streamStatus = StreamStatus.CACHED_OPEN;
+                    cacheEntry.release();
+                }
+            } catch (IOException e) {
+                LOG.warn("Reopen stream error.", e);
+            }
+        }
+    }
+
+    public synchronized void closeCachedStream() throws IOException {
         if (streamStatus == StreamStatus.CACHED_OPEN) {
-            streamStatus = StreamStatus.CACHED_CLOSED;
+            LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSING);
+            streamStatus = StreamStatus.CACHED_CLOSING;
             position = fsdis.getPos();
             fsdis.close();
             fsdis = null;
@@ -191,7 +239,15 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
 
     @Override
     public void close() throws IOException {
-        closeStream();
+        if (closed) {
+            return;
+        }
+        closed = true;
+        closeCachedStream();
+    }
+
+    public boolean isClosed() {
+        return closed;
     }
 
     @Override
@@ -280,6 +336,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
     /** The status of the underlying stream. */
     enum StreamStatus {
         CACHED_OPEN,
+        CACHED_CLOSING,
         CACHED_CLOSED,
         ORIGINAL
     }

@@ -19,6 +19,7 @@
 package org.apache.flink.state.forst.fs.cache;
 
 import org.apache.flink.core.fs.FSDataInputStream;
+import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.asyncprocessing.ReferenceCounted;
@@ -29,8 +30,10 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.Queue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A file cache entry that encapsulates file and the size of the file, and provides methods to read
@@ -38,6 +41,7 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class FileCacheEntry extends ReferenceCounted {
     private static final Logger LOG = LoggerFactory.getLogger(FileCacheEntry.class);
+    private static final int READ_BUFFER_SIZE = 64 * 1024;
 
     final FileBasedCache fileBasedCache;
 
@@ -59,9 +63,20 @@ public class FileCacheEntry extends ReferenceCounted {
 
     final String cacheKey;
 
+    final AtomicReference<EntryStatus> status;
+
+    public enum EntryStatus {
+        LOADED,
+        LOADING,
+        INVALID,
+        REMOVING,
+        REMOVED,
+        CLOSED
+    }
+
     FileCacheEntry(
             FileBasedCache fileBasedCache, Path originalPath, Path cachePath, long entrySize) {
-        super(1);
+        super(0);
         this.fileBasedCache = fileBasedCache;
         this.cacheFs = fileBasedCache.cacheFs;
         this.originalPath = originalPath;
@@ -70,40 +85,134 @@ public class FileCacheEntry extends ReferenceCounted {
         this.closed = false;
         this.openedStreams = new LinkedBlockingQueue<>();
         this.cacheKey = cachePath.toString();
+        this.status = new AtomicReference<>(EntryStatus.REMOVED);
+        LOG.info("Create new cache entry {}.", cachePath);
     }
 
     public CachedDataInputStream open(FSDataInputStream originalStream) throws IOException {
-        if (!closed && tryRetain() > 0) {
+        LOG.info("Open new stream for cache entry {}.", cachePath);
+        FSDataInputStream cacheStream = getCacheStream();
+        if (cacheStream != null) {
             CachedDataInputStream inputStream =
-                    new CachedDataInputStream(this, cacheFs.open(cachePath), originalStream);
+                    new CachedDataInputStream(fileBasedCache, this, cacheStream, originalStream);
             openedStreams.add(inputStream);
             release();
             return inputStream;
         } else {
-            return null;
+            CachedDataInputStream inputStream =
+                    new CachedDataInputStream(fileBasedCache, this, originalStream);
+            openedStreams.add(inputStream);
+            return inputStream;
         }
+    }
+
+    public FSDataInputStream getCacheStream() throws IOException {
+        if (status.get() == EntryStatus.LOADED && tryRetain() > 0) {
+            return cacheFs.open(cachePath);
+        }
+        return null;
     }
 
     public void touch() {
         fileBasedCache.get(cacheKey);
     }
 
-    public void invalidate() {
-        if (!closed) {
-            closed = true;
+    public Path load() {
+        FSDataInputStream inputStream = null;
+        FSDataOutputStream outputStream = null;
+        try {
+             final byte[] buffer = new byte[READ_BUFFER_SIZE];
+
+             inputStream = originalPath.getFileSystem().open(originalPath, READ_BUFFER_SIZE);
+
+             outputStream = cacheFs.create(cachePath, FileSystem.WriteMode.OVERWRITE);
+
+             long maxTransferBytes = originalPath.getFileSystem().getFileStatus(originalPath).getLen();
+
+             while (maxTransferBytes > 0) {
+                 int maxReadBytes = (int) Math.min(maxTransferBytes, READ_BUFFER_SIZE);
+                 int readBytes = inputStream.read(buffer, 0, maxReadBytes);
+
+                 if (readBytes == -1) {
+                     break;
+                 }
+
+                 outputStream.write(buffer, 0, readBytes);
+
+                 maxTransferBytes -= readBytes;
+             }
+             return cachePath;
+        } catch (IOException e) {
+            return null;
+        } finally {
+            try {
+                if (inputStream != null) {
+                    inputStream.close();
+                }
+                if (outputStream != null) {
+                    outputStream.close();
+                }
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+    }
+
+    public synchronized void loaded() {
+        // 0 -> 1
+        if (status.get() == EntryStatus.LOADED) {
+            retain();
+        }
+    }
+
+    public synchronized boolean invalidate() {
+        if (switchStatus(EntryStatus.LOADED, EntryStatus.INVALID)) {
+            release();
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized void close() {
+        if (switchStatus(EntryStatus.LOADED, EntryStatus.CLOSED)) {
             release();
         }
     }
 
     @Override
     protected void referenceCountReachedZero(@Nullable Object o) {
+        fileBasedCache.deleteCacheEntry(this);
+    }
+
+    public void doRemove() {
         try {
-            for (CachedDataInputStream stream : openedStreams) {
-                stream.close();
+            Iterator<CachedDataInputStream> iterator = openedStreams.iterator();
+            while (iterator.hasNext()) {
+                CachedDataInputStream stream = iterator.next();
+                if (stream.isClosed()) {
+                    iterator.remove();
+                } else {
+                    stream.closeCachedStream();
+                }
             }
             cacheFs.delete(cachePath, false);
+            status.set(FileCacheEntry.EntryStatus.REMOVED);
         } catch (Exception e) {
             LOG.warn("Failed to delete cache entry {}.", cachePath, e);
+        }
+    }
+
+    public boolean switchStatus(EntryStatus from, EntryStatus to) {
+        if (status.compareAndSet(from, to)) {
+            LOG.info(
+                    "Cache {} (for {}) Switch status from {} to {}.",
+                    originalPath,
+                    cachePath,
+                    from,
+                    to);
+            return true;
+        } else {
+            return false;
         }
     }
 }

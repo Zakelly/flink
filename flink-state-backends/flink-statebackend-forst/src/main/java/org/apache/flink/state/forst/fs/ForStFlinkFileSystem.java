@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -59,7 +60,7 @@ import java.util.List;
  * <p>All methods in this class maybe used by ForSt, please start a discussion firstly if it has to
  * be modified.
  */
-public class ForStFlinkFileSystem extends FileSystem {
+public class ForStFlinkFileSystem extends FileSystem implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(ForStFlinkFileSystem.class);
 
@@ -117,12 +118,12 @@ public class ForStFlinkFileSystem extends FileSystem {
         if (cacheBase == null || cacheCapacity <= 0 && cacheReservedSize <= 0) {
             return null;
         }
-        if (cacheBase.getFileSystem().equals(remoteForStPath.getFileSystem())) {
-            LOG.info(
-                    "Skip creating ForSt cache "
-                            + "since the cache and primary path are on the same file system.");
-            return null;
-        }
+//        if (cacheBase.getFileSystem().equals(remoteForStPath.getFileSystem())) {
+//            LOG.info(
+//                    "Skip creating ForSt cache "
+//                            + "since the cache and primary path are on the same file system.");
+//            return null;
+//        }
         CacheLimitPolicy cacheLimitPolicy = null;
         if (cacheCapacity > 0 && cacheReservedSize > 0) {
             cacheLimitPolicy =
@@ -208,10 +209,6 @@ public class ForStFlinkFileSystem extends FileSystem {
                     FSDataInputStream inputStream = source.openInputStream(bufferSize);
                     CachedDataInputStream cachedDataInputStream =
                             createCachedDataInputStream(dbFilePath, source, inputStream);
-                    if (cachedDataInputStream == null) {
-                        cachedDataInputStream = new CachedDataInputStream(inputStream);
-                    }
-                    cachedDataInputStream.setFileBasedCache(fileBasedCache);
                     return cachedDataInputStream == null ? inputStream : cachedDataInputStream;
                 },
                 DEFAULT_INPUT_STREAM_CAPACITY,
@@ -230,10 +227,6 @@ public class ForStFlinkFileSystem extends FileSystem {
                     FSDataInputStream inputStream = source.openInputStream();
                     CachedDataInputStream cachedDataInputStream =
                             createCachedDataInputStream(dbFilePath, source, inputStream);
-                    if (cachedDataInputStream == null) {
-                        cachedDataInputStream = new CachedDataInputStream(inputStream);
-                    }
-                    cachedDataInputStream.setFileBasedCache(fileBasedCache);
                     return cachedDataInputStream == null ? inputStream : cachedDataInputStream;
                 },
                 DEFAULT_INPUT_STREAM_CAPACITY,
@@ -353,7 +346,10 @@ public class ForStFlinkFileSystem extends FileSystem {
 
     public synchronized void registerReusedRestoredFile(
             String key, StreamStateHandle stateHandle, Path dbFilePath) {
-        fileMappingManager.registerReusedRestoredFile(key, stateHandle, dbFilePath);
+        MappingEntry mappingEntry = fileMappingManager.registerReusedRestoredFile(key, stateHandle, dbFilePath);
+        if (fileBasedCache != null) {
+            fileBasedCache.registerInCache(mappingEntry.getSourcePath(), stateHandle.getStateSize());
+        }
     }
 
     public synchronized @Nullable MappingEntry getMappingEntry(Path path) {
@@ -371,6 +367,7 @@ public class ForStFlinkFileSystem extends FileSystem {
             return null;
         }
 
+        LOG.info("Create cache output for DB: {} to {}", dbFilePath, srcRealPath);
         return fileBasedCache == null ? null : fileBasedCache.create(outputStream, srcRealPath);
     }
 
@@ -381,9 +378,17 @@ public class ForStFlinkFileSystem extends FileSystem {
             return null;
         }
 
+        LOG.info("Create cache input for DB: {} to {}", dbFilePath, source.getFilePath());
         return fileBasedCache == null
                 ? null
                 : fileBasedCache.open(source.getFilePath(), inputStream);
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (fileBasedCache != null) {
+            fileBasedCache.close();
+        }
     }
 
     public static class FileStatusWrapper implements FileStatus {

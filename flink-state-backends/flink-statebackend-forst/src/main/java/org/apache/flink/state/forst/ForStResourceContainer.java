@@ -456,6 +456,9 @@ public final class ForStResourceContainer implements AutoCloseable {
             sharedResources.close();
         }
         cleanRelocatedDbLogs();
+        if (forStFileSystem != null) {
+            forStFileSystem.close();
+        }
     }
 
     /**

@@ -26,10 +26,16 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.ThreadSafeSimpleCounter;
 
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * A file-granularity LRU cache. Only newly generated SSTs are written to the cache, the file
@@ -37,7 +43,7 @@ import java.io.IOException;
  * and cache simultaneously, so, the cached file can be directly deleted with persisting when
  * evicting.
  */
-public class FileBasedCache extends LruCache<String, FileCacheEntry> {
+public class FileBasedCache extends DoubleLinkLru implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(FileBasedCache.class);
 
     private static final String FORST_CACHE_PREFIX = "forst.fileCache";
@@ -53,7 +59,7 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
     /** Whether the cache is closed. */
     private volatile boolean closed;
 
-    private MetricGroup metricGroup;
+    private final ExecutorService executorService;
 
     /** Hit metric. */
     private transient Counter hitCounter;
@@ -61,23 +67,37 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
     /** Miss metric. */
     private transient Counter missCounter;
 
+    /** Metric for load back */
+    private transient Counter loadBackCounter;
+
+    /** Metric for eviction */
+    private transient Counter evictCounter;
+
     public FileBasedCache(
             int capacity,
             CacheLimitPolicy cacheLimitPolicy,
             FileSystem cacheFs,
             Path basePath,
             MetricGroup metricGroup) {
-        super(capacity, cacheLimitPolicy);
+        super(cacheLimitPolicy);
         this.closed = false;
         this.cacheFs = cacheFs;
         this.basePath = basePath;
+        this.executorService =
+                Executors.newFixedThreadPool(
+                        4,
+                        new ExecutorThreadFactory("ForSt-LruLoader"));
         if (metricGroup != null) {
-            this.metricGroup = metricGroup;
             this.hitCounter =
                     metricGroup.counter(FORST_CACHE_PREFIX + ".hit", new ThreadSafeSimpleCounter());
             this.missCounter =
                     metricGroup.counter(
                             FORST_CACHE_PREFIX + ".miss", new ThreadSafeSimpleCounter());
+            this.loadBackCounter =
+                    metricGroup.counter(FORST_CACHE_PREFIX + ".loadback", new ThreadSafeSimpleCounter());
+            this.evictCounter =
+                    metricGroup.counter(
+                            FORST_CACHE_PREFIX + ".evict", new ThreadSafeSimpleCounter());
             metricGroup.gauge(
                     FORST_CACHE_PREFIX + ".usedBytes", () -> cacheLimitPolicy.usedBytes());
             cacheLimitPolicy.registerCustomizedMetrics(FORST_CACHE_PREFIX, metricGroup);
@@ -90,6 +110,10 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
 
     public static void setFlinkThread() {
         isFlinkThread.set(true);
+    }
+
+    public static boolean isFlinkThread() {
+        return isFlinkThread.get();
     }
 
     public boolean incHitCounter() {
@@ -143,13 +167,12 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
         }
     }
 
-    @Override
-    FileCacheEntry internalGet(String key, FileCacheEntry value) {
-        return value;
+    public void registerInCache(Path originalPath, long size) {
+        Path cachePath = getCachePath(originalPath);
+        FileCacheEntry fileCacheEntry =
+                new FileCacheEntry(this, originalPath, cachePath, size);
+        put(cachePath.toString(), fileCacheEntry);
     }
-
-    @Override
-    void internalInsert(String key, FileCacheEntry value) {}
 
     @Override
     void internalRemove(FileCacheEntry value) {
@@ -159,5 +182,64 @@ public class FileBasedCache extends LruCache<String, FileCacheEntry> {
     @Override
     long getValueResource(FileCacheEntry value) {
         return value.entrySize;
+    }
+
+    @Override
+    void addToSecondLink(FileCacheEntry value) {
+        LOG.info("Cache entry {} to second link.", value.cachePath);
+        if (value.invalidate() && evictCounter != null) {
+            evictCounter.inc();
+        }
+    }
+
+    @Override
+    void addToFirstLink(FileCacheEntry value) {
+        LOG.info("Cache entry {} to first link.", value.cachePath);
+        loadBackCache(value);
+    }
+
+    private void loadBackCache(FileCacheEntry entry) {
+        if (entry.switchStatus(FileCacheEntry.EntryStatus.INVALID, FileCacheEntry.EntryStatus.LOADED)) {
+            // just a try
+            entry.loaded();
+            if (loadBackCounter != null) {
+                loadBackCounter.inc();
+            }
+        }  if (entry.switchStatus(FileCacheEntry.EntryStatus.REMOVED, FileCacheEntry.EntryStatus.LOADING)) {
+            executorService.submit(() -> {
+                if (entry.status.get() == FileCacheEntry.EntryStatus.LOADING) {
+                    Path path = entry.load();
+                    if (path == null) {
+                        entry.switchStatus(
+                                FileCacheEntry.EntryStatus.LOADING,
+                                FileCacheEntry.EntryStatus.REMOVED);
+                    } else if (entry.switchStatus(
+                            FileCacheEntry.EntryStatus.LOADING,
+                            FileCacheEntry.EntryStatus.LOADED)) {
+                        entry.loaded();
+                        if (loadBackCounter != null) {
+                            loadBackCounter.inc();
+                        }
+                    } else {
+                        try {
+                            path.getFileSystem().delete(path, false);
+                            // delete the file
+                        } catch (IOException e) {
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    public void deleteCacheEntry(FileCacheEntry entry) {
+        if (entry.switchStatus(FileCacheEntry.EntryStatus.INVALID, FileCacheEntry.EntryStatus.REMOVING)) {
+            executorService.submit(entry::doRemove);
+        }
+    }
+
+    @Override
+    public void close() throws IOException {
+        executorService.shutdown();
     }
 }
