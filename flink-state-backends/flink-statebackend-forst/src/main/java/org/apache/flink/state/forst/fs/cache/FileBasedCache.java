@@ -182,7 +182,7 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
 
     @Override
     boolean whetherToPromoteToFirstLink(FileCacheEntry value) {
-        return ++value.promoteCount > 5;
+        return value.evictCount < 5 && ++value.promoteCount > 5;
     }
 
     @Override
@@ -200,6 +200,7 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         LOG.info("Cache entry {} to second link.", value.cachePath);
         if (value.invalidate() && evictCounter != null) {
             evictCounter.inc();
+            value.evictCount++;
         }
     }
 
