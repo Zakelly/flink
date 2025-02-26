@@ -124,8 +124,14 @@ under the License.
 				</exclusion>
 			</exclusions>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-statebackend-forst</artifactId>
+			<version>${project.version}</version>
+			<scope>compile</scope>
+		</dependency>
 
-    </dependencies>
+	</dependencies>
 
 	<build>
 		<plugins>

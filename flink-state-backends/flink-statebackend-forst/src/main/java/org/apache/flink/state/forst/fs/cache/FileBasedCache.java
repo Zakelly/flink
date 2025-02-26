@@ -197,7 +197,7 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
 
     @Override
     void addToSecondLink(FileCacheEntry value) {
-        LOG.info("Cache entry {} to second link.", value.cachePath);
+        LOG.trace("Cache entry {} to second link.", value.cachePath);
         if (value.invalidate() && evictCounter != null) {
             evictCounter.inc();
             value.evictCount++;
@@ -206,7 +206,7 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
 
     @Override
     void addToFirstLink(FileCacheEntry value) {
-        LOG.info("Cache entry {} to first link.", value.cachePath);
+        LOG.trace("Cache entry {} to first link.", value.cachePath);
         loadBackCache(value);
     }
 

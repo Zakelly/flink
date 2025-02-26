@@ -149,7 +149,7 @@ public abstract class DoubleLinkLru {
 
     private synchronized void updateSecondLinkCountLimit(int delta) {
         int newValue = (secondLink.size() + outOfCache.size() + delta) / 2 + 1;
-        LOG.info("Update second link count limit from {} to {}.", secondLinkCountLimit.get(), newValue);
+        LOG.trace("Update second link count limit from {} to {}.", secondLinkCountLimit.get(), newValue);
         secondLinkCountLimit.set(newValue);
     }
 

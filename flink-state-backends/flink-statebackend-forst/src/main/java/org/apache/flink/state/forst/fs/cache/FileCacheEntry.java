@@ -90,11 +90,11 @@ public class FileCacheEntry extends ReferenceCounted {
         this.openedStreams = new LinkedBlockingQueue<>();
         this.cacheKey = cachePath.toString();
         this.status = new AtomicReference<>(EntryStatus.REMOVED);
-        LOG.info("Create new cache entry {}.", cachePath);
+        LOG.trace("Create new cache entry {}.", cachePath);
     }
 
     public CachedDataInputStream open(FSDataInputStream originalStream) throws IOException {
-        LOG.info("Open new stream for cache entry {}.", cachePath);
+        LOG.trace("Open new stream for cache entry {}.", cachePath);
         FSDataInputStream cacheStream = getCacheStream();
         if (cacheStream != null) {
             CachedDataInputStream inputStream =
@@ -208,7 +208,7 @@ public class FileCacheEntry extends ReferenceCounted {
 
     public boolean switchStatus(EntryStatus from, EntryStatus to) {
         if (status.compareAndSet(from, to)) {
-            LOG.info(
+            LOG.trace(
                     "Cache {} (for {}) Switch status from {} to {}.",
                     originalPath,
                     cachePath,

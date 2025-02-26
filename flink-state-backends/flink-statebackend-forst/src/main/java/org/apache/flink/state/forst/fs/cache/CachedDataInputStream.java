@@ -73,7 +73,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
         this.originalStream = originalStream;
         this.streamStatus = StreamStatus.CACHED_OPEN;
         this.semaphore = new Semaphore(0);
-        LOG.info("Create CachedDataInputStream for {} with CACHED_OPEN", cacheEntry.cachePath);
+        LOG.trace("Create CachedDataInputStream for {} with CACHED_OPEN", cacheEntry.cachePath);
     }
 
     public CachedDataInputStream(FileBasedCache fileBasedCache, FileCacheEntry cacheEntry, FSDataInputStream originalStream) {
@@ -83,7 +83,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
         this.originalStream = originalStream;
         this.streamStatus = StreamStatus.CACHED_CLOSED;
         this.semaphore = new Semaphore(0);
-        LOG.info("Create CachedDataInputStream for {} with CACHED_CLOSED", cacheEntry.cachePath);
+        LOG.trace("Create CachedDataInputStream for {} with CACHED_CLOSED", cacheEntry.cachePath);
     }
 
     private FSDataInputStream getStream() throws IOException {
@@ -106,7 +106,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
                 }
                 originalStream.seek(position);
                 position = -1;
-                LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSED);
+                LOG.trace("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSED);
                 streamStatus = StreamStatus.CACHED_CLOSED;
             }
             // try reopen
@@ -146,7 +146,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
             try {
                 fsdis = cacheEntry.getCacheStream();
                 if (fsdis != null) {
-                    LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_OPEN);
+                    LOG.trace("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_OPEN);
                     fsdis.seek(originalStream.getPos());
                     streamStatus = StreamStatus.CACHED_OPEN;
                     cacheEntry.release();
@@ -159,7 +159,7 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
 
     public synchronized void closeCachedStream() throws IOException {
         if (streamStatus == StreamStatus.CACHED_OPEN) {
-            LOG.info("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSING);
+            LOG.trace("Stream {} status from {} to {}", cacheEntry.cachePath, streamStatus, StreamStatus.CACHED_CLOSING);
             streamStatus = StreamStatus.CACHED_CLOSING;
             position = fsdis.getPos();
             fsdis.close();
@@ -291,6 +291,14 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
         }
         try {
             FSDataInputStream stream = getStream();
+//            if (isFlinkThread()) {
+//                LOG.info(
+//                        "Thread {}: Read file {}, offset={}, length={}",
+//                        Thread.currentThread().getName(),
+//                        cacheEntry.cachePath.getName(),
+//                        stream.getPos(),
+//                        bb.remaining());
+//            }
             return stream instanceof ByteBufferReadable
                     ? ((ByteBufferReadable) stream).read(bb)
                     : readFullyFromFSDataInputStream(stream, bb);
@@ -303,6 +311,14 @@ public class CachedDataInputStream extends FSDataInputStream implements ByteBuff
     public int read(long position, ByteBuffer bb) throws IOException {
         try {
             FSDataInputStream stream = getStream();
+//            if (isFlinkThread()) {
+//                LOG.info(
+//                        "Thread {}: Read file {}, offset={}, length={}",
+//                        Thread.currentThread().getName(),
+//                        cacheEntry.cachePath.getName(),
+//                        position,
+//                        bb.remaining());
+//            }
             if (stream instanceof ByteBufferReadable) {
                 return ((ByteBufferReadable) stream).read(position, bb);
             } else {

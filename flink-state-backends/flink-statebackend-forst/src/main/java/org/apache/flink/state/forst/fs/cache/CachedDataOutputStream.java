@@ -58,7 +58,7 @@ public class CachedDataOutputStream extends FSDataOutputStream {
         this.cachePath = cachePath;
         this.cacheOutputStream = cacheOutputStream;
         this.fileBasedCache = cache;
-        LOG.info("Create CachedDataOutputStream for {} and {}", originalPath, cachePath);
+        LOG.trace("Create CachedDataOutputStream for {} and {}", originalPath, cachePath);
     }
 
     @Override
