@@ -55,7 +55,7 @@ public class FileCacheEntry extends ReferenceCounted {
     final Path cachePath;
 
     /** The size of file. */
-    long entrySize;
+    final long entrySize;
 
     volatile boolean closed;
 
@@ -65,9 +65,13 @@ public class FileCacheEntry extends ReferenceCounted {
 
     final AtomicReference<EntryStatus> status;
 
-    volatile int promoteCount = 0;
+    Runnable touchFunction;
 
-    volatile int evictCount = 0;
+    long secondAccessEpoch = 0L;
+
+    int promoteCount = 0;
+
+    int evictCount = 0;
 
     public enum EntryStatus {
         LOADED,
@@ -75,6 +79,7 @@ public class FileCacheEntry extends ReferenceCounted {
         INVALID,
         REMOVING,
         REMOVED,
+        CLOSING,
         CLOSED
     }
 
@@ -118,7 +123,7 @@ public class FileCacheEntry extends ReferenceCounted {
     }
 
     public void touch() {
-        fileBasedCache.get(cacheKey);
+        touchFunction.run();
     }
 
     public Path load() {
@@ -177,18 +182,24 @@ public class FileCacheEntry extends ReferenceCounted {
         return false;
     }
 
+    public synchronized void invalidateOnClose() {
+        release();
+    }
+
     public synchronized void close() {
-        if (switchStatus(EntryStatus.LOADED, EntryStatus.CLOSED)) {
-            release();
+        if (getAndSetStatus(EntryStatus.CLOSING) == EntryStatus.LOADED) {
+            fileBasedCache.scheduleRemove(this);
+        } else {
+            status.set(EntryStatus.CLOSED);
         }
     }
 
     @Override
     protected void referenceCountReachedZero(@Nullable Object o) {
-        fileBasedCache.deleteCacheEntry(this);
+        fileBasedCache.removeFile(this);
     }
 
-    public void doRemove() {
+    public void doRemoveFile() {
         try {
             Iterator<CachedDataInputStream> iterator = openedStreams.iterator();
             while (iterator.hasNext()) {
@@ -200,7 +211,9 @@ public class FileCacheEntry extends ReferenceCounted {
                 }
             }
             cacheFs.delete(cachePath, false);
-            status.set(FileCacheEntry.EntryStatus.REMOVED);
+            if (status.get() != EntryStatus.CLOSED) {
+                status.set(FileCacheEntry.EntryStatus.REMOVED);
+            }
         } catch (Exception e) {
             LOG.warn("Failed to delete cache entry {}.", cachePath, e);
         }
@@ -218,5 +231,9 @@ public class FileCacheEntry extends ReferenceCounted {
         } else {
             return false;
         }
+    }
+
+    public EntryStatus getAndSetStatus(EntryStatus to) {
+        return status.getAndSet(to);
     }
 }

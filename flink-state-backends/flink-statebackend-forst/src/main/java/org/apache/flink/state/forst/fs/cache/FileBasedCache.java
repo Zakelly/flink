@@ -33,9 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * A file-granularity LRU cache. Only newly generated SSTs are written to the cache, the file
@@ -43,12 +43,14 @@ import java.util.concurrent.Executors;
  * and cache simultaneously, so, the cached file can be directly deleted with persisting when
  * evicting.
  */
-public class FileBasedCache extends DoubleLinkLru implements Closeable {
+public final class FileBasedCache extends DoubleLinkedLru<String, FileCacheEntry> implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(FileBasedCache.class);
 
     private static final String FORST_CACHE_PREFIX = "forst.fileCache";
 
     private static final ThreadLocal<Boolean> isFlinkThread = ThreadLocal.withInitial(() -> false);
+
+    private final CacheLimitPolicy cacheLimitPolicy;
 
     /** The file system of cache. */
     final FileSystem cacheFs;
@@ -60,6 +62,8 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
     private volatile boolean closed;
 
     private final ExecutorService executorService;
+
+    private final ScheduledExecutorService scheduledExecutorService;
 
     /** Hit metric. */
     private transient Counter hitCounter;
@@ -73,20 +77,24 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
     /** Metric for eviction */
     private transient Counter evictCounter;
 
+    private long secondAccessEpoch = 0L;
+
     public FileBasedCache(
             int capacity,
             CacheLimitPolicy cacheLimitPolicy,
             FileSystem cacheFs,
             Path basePath,
             MetricGroup metricGroup) {
-        super(cacheLimitPolicy);
         this.closed = false;
+        this.cacheLimitPolicy = cacheLimitPolicy;
         this.cacheFs = cacheFs;
         this.basePath = basePath;
         this.executorService =
                 Executors.newFixedThreadPool(
                         4,
                         new ExecutorThreadFactory("ForSt-LruLoader"));
+        this.scheduledExecutorService = Executors.newScheduledThreadPool(1,
+                new ExecutorThreadFactory("ForSt-Lru-Disposer"));
         if (metricGroup != null) {
             this.hitCounter =
                     metricGroup.counter(FORST_CACHE_PREFIX + ".hit", new ThreadSafeSimpleCounter());
@@ -116,12 +124,10 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         return isFlinkThread.get();
     }
 
-    public boolean incHitCounter() {
+    public void incHitCounter() {
         if (hitCounter != null && isFlinkThread.get()) {
             hitCounter.inc();
-            return true;
         }
-        return false;
     }
 
     public void incMissCounter() {
@@ -139,7 +145,7 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         if (closed) {
             return null;
         }
-        FileCacheEntry entry = get(getCachePath(path).toString());
+        FileCacheEntry entry = get(getCachePath(path).toString(), isFlinkThread());
         if (entry != null) {
             return entry.open(originalStream);
         } else {
@@ -167,50 +173,116 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         }
     }
 
+    //-----------------------------
+    // Overriding methods to provide thread-safe
+    //-----------------------------
+
+    @Override
+    public FileCacheEntry get(String key, boolean affectOrder) {
+        synchronized (this) {
+            return super.get(key, affectOrder);
+        }
+    }
+
+
+    @Override
+    public void addFirst(String key, FileCacheEntry value) {
+        synchronized (this) {
+            super.addFirst(key, value);
+        }
+    }
+
+    @Override
+    public void addSecond(String key, FileCacheEntry value) {
+        synchronized (this) {
+            super.addSecond(key, value);
+        }
+    }
+
+    @Override
+    public FileCacheEntry remove(String key) {
+        synchronized (this) {
+            return super.remove(key);
+        }
+    }
+
+    /**
+     * Directly insert in cache when restoring.
+     */
     public void registerInCache(Path originalPath, long size) {
         Path cachePath = getCachePath(originalPath);
         FileCacheEntry fileCacheEntry =
                 new FileCacheEntry(this, originalPath, cachePath, size);
         fileCacheEntry.promoteCount = 5;
-        put(cachePath.toString(), fileCacheEntry);
+        addSecond(cachePath.toString(), fileCacheEntry);
     }
 
-    @Override
-    void internalRemove(FileCacheEntry value) {
-        value.invalidate();
-    }
-
-    @Override
-    boolean whetherToPromoteToFirstLink(FileCacheEntry value) {
-        return value.evictCount < 5 && ++value.promoteCount > 5;
-    }
-
-    @Override
-    void moveOutOfCache(FileCacheEntry value) {
-        value.promoteCount = 0;
-    }
-
-    @Override
-    long getValueResource(FileCacheEntry value) {
-        return value.entrySize;
-    }
-
-    @Override
-    void addToSecondLink(FileCacheEntry value) {
-        LOG.trace("Cache entry {} to second link.", value.cachePath);
-        if (value.invalidate() && evictCounter != null) {
-            evictCounter.inc();
-            value.evictCount++;
+    public void removeFile(FileCacheEntry entry) {
+        if (entry.switchStatus(FileCacheEntry.EntryStatus.INVALID, FileCacheEntry.EntryStatus.REMOVING)
+        || entry.switchStatus(FileCacheEntry.EntryStatus.CLOSING, FileCacheEntry.EntryStatus.CLOSED)) {
+            executorService.submit(entry::doRemoveFile);
         }
     }
 
-    @Override
-    void addToFirstLink(FileCacheEntry value) {
-        LOG.trace("Cache entry {} to first link.", value.cachePath);
-        loadBackCache(value);
+    public void scheduleRemove(FileCacheEntry entry) {
+        scheduledExecutorService.schedule(entry::invalidateOnClose, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
-    private void loadBackCache(FileCacheEntry entry) {
+    @Override
+    public void close() throws IOException {
+        executorService.shutdown();
+    }
+
+    //-----------------------------
+    // Hook methods implementation
+    //-----------------------------
+
+    @Override
+    boolean isSafeToAddFirst(FileCacheEntry value) {
+        return cacheLimitPolicy.isSafeToAdd(value.entrySize);
+    }
+
+    @Override
+    void newNodeCreated(FileCacheEntry value, DoubleLinkedLru<String, FileCacheEntry>.Node n) {
+        value.touchFunction = () -> {
+            synchronized (FileBasedCache.this) {
+                accessNode(n);
+            }
+        };
+    }
+
+    @Override
+    void addedToFirst(FileCacheEntry value) {
+        LOG.info("Cache entry {} added to first link.", value.cachePath.getName());
+        while(cacheLimitPolicy.isOverflow(value.entrySize)) {
+            moveMiddleFront();
+        }
+        cacheLimitPolicy.acquire(value.entrySize);
+    }
+
+    @Override
+    void addedToSecond(FileCacheEntry value) {
+        LOG.info("Cache entry {} added to second link.", value.cachePath.getName());
+        value.secondAccessEpoch = (++secondAccessEpoch);
+    }
+
+    @Override
+    void removedFromFirst(FileCacheEntry value) {
+        cacheLimitPolicy.release(value.entrySize);
+        value.close();
+    }
+
+    @Override
+    void removedFromSecond(FileCacheEntry value) {
+        value.close();
+    }
+
+    @Override
+    void movedToFirst(FileCacheEntry entry) {
+        // here we won't consider the cache limit policy.
+        // since there will be promotedToFirst called after this.
+        LOG.info("Cache entry {} moved to first link.", entry.cachePath.getName());
+        // trigger the loading
         if (entry.switchStatus(FileCacheEntry.EntryStatus.INVALID, FileCacheEntry.EntryStatus.LOADED)) {
             // just a try
             entry.loaded();
@@ -244,14 +316,36 @@ public class FileBasedCache extends DoubleLinkLru implements Closeable {
         }
     }
 
-    public void deleteCacheEntry(FileCacheEntry entry) {
-        if (entry.switchStatus(FileCacheEntry.EntryStatus.INVALID, FileCacheEntry.EntryStatus.REMOVING)) {
-            executorService.submit(entry::doRemove);
+    @Override
+    void movedToSecond(FileCacheEntry value) {
+        // trigger the evicting
+        LOG.info("Cache entry {} moved to second link.", value.cachePath.getName());
+        cacheLimitPolicy.release(value.entrySize);
+        if (value.invalidate() && evictCounter != null) {
+            evictCounter.inc();
+            value.evictCount++;
         }
     }
 
     @Override
-    public void close() throws IOException {
-        executorService.shutdown();
+    boolean nodeAccessedAtSecond(FileCacheEntry value) {
+        if (secondAccessEpoch - value.secondAccessEpoch < getSecondSize() / 2) {
+            // current entry are still under the second link limit
+            value.promoteCount++;
+        } else {
+            value.promoteCount = 0;
+            secondAccessEpoch++;
+        }
+        value.secondAccessEpoch = secondAccessEpoch;
+        return value.evictCount < 3 && ++value.promoteCount > 5;
+    }
+
+    @Override
+    void promotedToFirst(FileCacheEntry value) {
+        value.promoteCount = 0;
+        while(cacheLimitPolicy.isOverflow(value.entrySize)) {
+            moveMiddleFront();
+        }
+        cacheLimitPolicy.acquire(value.entrySize);
     }
 }

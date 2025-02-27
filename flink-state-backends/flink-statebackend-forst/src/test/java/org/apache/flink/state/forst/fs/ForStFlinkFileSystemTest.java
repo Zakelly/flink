@@ -282,7 +282,7 @@ public class ForStFlinkFileSystemTest {
         assertThat(registeredGauges.get("forst.fileCache.usedBytes").getValue()).isEqualTo(234L);
         assertThat(registeredCounters.get("forst.fileCache.hit").getCount()).isEqualTo(0L);
         assertThat(registeredCounters.get("forst.fileCache.miss").getCount()).isEqualTo(0L);
-        FileCacheEntry cacheEntry1 = cache.get(cachePath.getPath() + "/" + sstRealPath1.getName());
+        FileCacheEntry cacheEntry1 = cache.get(cachePath.getPath() + "/" + sstRealPath1.getName(), true);
         assertThat(cacheEntry1).isNotNull();
         assertThat(cacheEntry1.getReferenceCount()).isEqualTo(1);
 

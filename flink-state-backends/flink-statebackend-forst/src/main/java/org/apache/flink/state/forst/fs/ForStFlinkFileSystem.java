@@ -367,7 +367,6 @@ public class ForStFlinkFileSystem extends FileSystem implements Closeable {
             return null;
         }
 
-        LOG.info("Create cache output for DB: {} to {}", dbFilePath, srcRealPath);
         return fileBasedCache == null ? null : fileBasedCache.create(outputStream, srcRealPath);
     }
 
@@ -378,7 +377,6 @@ public class ForStFlinkFileSystem extends FileSystem implements Closeable {
             return null;
         }
 
-        LOG.info("Create cache input for DB: {} to {}", dbFilePath, source.getFilePath());
         return fileBasedCache == null
                 ? null
                 : fileBasedCache.open(source.getFilePath(), inputStream);

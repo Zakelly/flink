@@ -114,6 +114,6 @@ public class CachedDataOutputStream extends FSDataOutputStream {
                 new FileCacheEntry(fileBasedCache, originalPath, cachePath, thisSize);
         fileCacheEntry.switchStatus(FileCacheEntry.EntryStatus.REMOVED, FileCacheEntry.EntryStatus.LOADED);
         fileCacheEntry.loaded();
-        fileBasedCache.put(cachePath.toString(), fileCacheEntry);
+        fileBasedCache.addFirst(cachePath.toString(), fileCacheEntry);
     }
 }
