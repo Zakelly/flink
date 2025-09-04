@@ -23,6 +23,7 @@ import org.apache.flink.api.common.state.v2.StateFuture;
 import org.apache.flink.api.common.state.v2.StateIterator;
 import org.apache.flink.core.asyncprocessing.AsyncFutureImpl;
 import org.apache.flink.core.asyncprocessing.CompletedAsyncFuture;
+import org.apache.flink.core.asyncprocessing.FilteredAndMappedStateIterator;
 import org.apache.flink.core.asyncprocessing.InternalAsyncFuture;
 
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * A collection of utilities that expand the usage of {@link StateFuture}. All the methods can only
@@ -135,5 +137,20 @@ public class StateFutureUtils {
                                 .thenApply(ignored -> result);
                     }
                 });
+    }
+
+    /**
+     * Apply a filter and a mapper on the input iterator.
+     *
+     * @param iterator the input iterator.
+     * @param matcher the filter function. If null, all entries are accepted.
+     * @param mapper the mapper function.
+     * @return the new iterator.
+     * @param <I> the input type.
+     * @param <O> the output type.
+     */
+    public static <I, O> StateIterator<O> applyIterator(
+            StateIterator<I> iterator, Function<I, Boolean> matcher, Function<I, O> mapper) {
+        return new FilteredAndMappedStateIterator<>(iterator, matcher, mapper);
     }
 }
