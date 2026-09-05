@@ -1,0 +1,164 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Create a manual Azure Pipeline using this YAML path.
+trigger: none
+pr: none
+
+pool:
+  vmImage: 'ubuntu-24.04'
+
+resources:
+  containers:
+    - container: flink-build-container
+      image: apache/flink-ci-docker:java_8_11_17_21_25_maven_386_jammy
+      options: --privileged
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  MAVEN_ARGS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+  MVN_RUN_VERBOSE: 'false'
+  PROFILE: '-Djdk17 -Pjava17-target'
+  STRESS_LOG_DIR: $(Build.ArtifactStagingDirectory)/file-merging-channel-state
+  FLINK_ARTIFACT_DIR: $(Pipeline.Workspace)/flink_artifact
+  PIPELINE_START_YEAR: $[format('{0:yyyy}', pipeline.startTime)]
+  CACHE_KEY: maven | $(Agent.OS) | **/pom.xml, !**/target/**
+  CACHE_FALLBACK_KEY: maven | $(Agent.OS)
+
+jobs:
+  - job: compile_file_merging_channel_state
+    displayName: Compile file-merged channel state recovery test
+    container: flink-build-container
+    timeoutInMinutes: 240
+    cancelTimeoutInMinutes: 10
+    workspace:
+      clean: all
+    steps:
+      - bash: |
+          set -euo pipefail
+          mkdir -p "$STRESS_LOG_DIR"
+          echo "##vso[task.setvariable variable=JAVA_HOME]$JAVA_HOME_17_X64"
+          echo "##vso[task.prependpath]$JAVA_HOME_17_X64/bin"
+        displayName: Set Java 17 and prepare logs
+
+      - script: ./tools/ci/free_disk_space.sh
+        target: host
+        displayName: Free up disk space
+
+      - task: Cache@2
+        displayName: Cache Maven local repo
+        inputs:
+          key: $(PIPELINE_START_YEAR) | $(CACHE_KEY)
+          restoreKeys: $(PIPELINE_START_YEAR) | $(CACHE_FALLBACK_KEY)
+          path: $(MAVEN_CACHE_FOLDER)
+        continueOnError: true
+
+      - bash: |
+          set -euo pipefail
+          MVN_LICENSE_CHECK_ARGS="" ./tools/ci/compile_ci.sh \
+            -Dfast -pl flink-tests -am 2>&1 | tee "$STRESS_LOG_DIR/compile.log"
+        displayName: Compile ITCase and reactor dependencies
+        timeoutInMinutes: 150
+
+      - script: ./tools/ci/create_build_artifact.sh
+        displayName: Prepare compiled Flink artifact
+
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: $(FLINK_ARTIFACT_DIR)
+          artifact: file-merging-channel-state-compiled
+
+      - task: PublishPipelineArtifact@1
+        displayName: Upload compilation logs
+        condition: always()
+        inputs:
+          targetPath: $(STRESS_LOG_DIR)
+          artifact: file-merging-channel-state-compile-logs
+
+  - job: file_merging_channel_state_stress
+    displayName: File-merged channel state recovery - five-hour stress test
+    dependsOn: compile_file_merging_channel_state
+    container: flink-build-container
+    # Microsoft-hosted agents allow at most six hours per job for public projects.
+    # Compilation runs in a separate job so it does not consume the test window.
+    timeoutInMinutes: 360
+    cancelTimeoutInMinutes: 10
+    workspace:
+      clean: all
+    steps:
+      - bash: |
+          set -euo pipefail
+          mkdir -p "$STRESS_LOG_DIR"
+          echo "##vso[task.setvariable variable=JAVA_HOME]$JAVA_HOME_17_X64"
+          echo "##vso[task.prependpath]$JAVA_HOME_17_X64/bin"
+        displayName: Set Java 17 and prepare logs
+
+      - script: ./tools/ci/free_disk_space.sh
+        target: host
+        displayName: Free up disk space
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          path: $(FLINK_ARTIFACT_DIR)
+          artifact: file-merging-channel-state-compiled
+
+      - script: ./tools/ci/unpack_build_artifact.sh
+        displayName: Restore compiled Flink artifact
+
+      - task: Cache@2
+        displayName: Restore Maven local repo
+        inputs:
+          key: $(PIPELINE_START_YEAR) | $(CACHE_KEY)
+          restoreKeys: $(PIPELINE_START_YEAR) | $(CACHE_FALLBACK_KEY)
+          path: $(MAVEN_CACHE_FOLDER)
+        continueOnError: true
+
+      # As in test_controller.sh, rebuild and install the JARs removed by artifact
+      # minimization, including shaded dependencies, before starting the test clock.
+      - bash: |
+          # maven-utils.sh probes mirrors and handles unsuccessful probes itself.
+          source ./tools/ci/maven-utils.sh || exit $?
+          set -euo pipefail
+          run_mvn -pl flink-tests -am \
+            -Pskip-webui-build -DskipTests -Dfast \
+            -T1C install 2>&1 | tee "$STRESS_LOG_DIR/prepare.log"
+        displayName: Rebuild and install test dependencies
+        timeoutInMinutes: 30
+
+      - bash: bash tools/azure-pipelines/file-merging-channel-state-stress.sh
+        displayName: Repeat ITCase until failure or five hours
+        # Allow the last iteration to finish after the five-hour launch window closes.
+        timeoutInMinutes: 315
+        env:
+          STRESS_DURATION_SECONDS: '18000'
+          STRESS_ITERATION_TIMEOUT_SECONDS: '600'
+
+      - task: PublishTestResults@2
+        displayName: Publish all completed iterations
+        condition: always()
+        inputs:
+          testResultsFormat: JUnit
+          searchFolder: $(STRESS_LOG_DIR)
+          testResultsFiles: 'run-*/reports/TEST-*.xml'
+          mergeTestResults: true
+          failTaskOnFailedTests: true
+          testRunTitle: FileMergingChannelStateITCase stress test
+
+      - task: PublishPipelineArtifact@1
+        displayName: Upload per-iteration diagnostics
+        condition: always()
+        inputs:
+          targetPath: $(STRESS_LOG_DIR)
+          artifact: file-merging-channel-state-stress
